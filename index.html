@@ -342,17 +342,29 @@
           <input id="search-input" type="text" placeholder="Search channels, Asianet, news, sports..." class="w-full bg-slate-800/90 text-slate-200 text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700/60 focus:outline-none focus:border-brand-500 placeholder-slate-500 transition">
         </div>
 
-        <div class="flex items-center gap-2">
-          <select id="region-filter" class="flex-1 bg-slate-800 text-slate-300 text-[11px] rounded-md px-2 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500">
+        <div class="grid grid-cols-3 gap-1.5">
+          <select id="region-filter" class="w-full bg-slate-800 text-slate-300 text-[11px] rounded-md px-1.5 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500 truncate">
             <option value="ALL">All Regions</option>
-            <option value="IN">India (Asianet, etc.)</option>
+            <option value="IN">India (IN)</option>
             <option value="GLOBAL">Global</option>
             <option value="US">United States</option>
             <option value="UK">United Kingdom</option>
             <option value="FR">France</option>
             <option value="DE">Germany</option>
           </select>
-          <select id="category-filter" class="flex-1 bg-slate-800 text-slate-300 text-[11px] rounded-md px-2 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500">
+          <select id="language-filter" class="w-full bg-slate-800 text-slate-300 text-[11px] rounded-md px-1.5 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500 truncate">
+            <option value="ALL">All Languages</option>
+            <option value="Malayalam">Malayalam</option>
+            <option value="Kannada">Kannada</option>
+            <option value="English">English</option>
+            <option value="Hindi">Hindi</option>
+            <option value="Tamil">Tamil</option>
+            <option value="Telugu">Telugu</option>
+            <option value="French">French</option>
+            <option value="German">German</option>
+            <option value="Spanish">Spanish</option>
+          </select>
+          <select id="category-filter" class="w-full bg-slate-800 text-slate-300 text-[11px] rounded-md px-1.5 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500 truncate">
             <option value="ALL">All Categories</option>
             <option value="News">News</option>
             <option value="Entertainment">Entertainment</option>
@@ -646,7 +658,8 @@
         logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
         group: "News",
         country: "IN",
-        url: "https://asianetnews.vgcdn.net/asianet-news/tracks-v1a1/mono.m3u8",
+        language: "Malayalam",
+        url: "https://amg13737-amg13737c1-amgplt0016.playout.now3.amagi.tv/playlist/amg13737-amg13737c1-amgplt0016/playlist.m3u8",
         program: "Asianet Varthakal & Prime Discussions"
       },
       {
@@ -655,6 +668,7 @@
         logo: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Suvarna_News_Logo.png/512px-Suvarna_News_Logo.png",
         group: "News",
         country: "IN",
+        language: "Kannada",
         url: "https://asianetnews.vgcdn.net/vglive-sk-335835/playlist.m3u8",
         program: "Suvarna Fast News & Karnataka Bulletins"
       },
@@ -664,6 +678,7 @@
         logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
         group: "Entertainment",
         country: "IN",
+        language: "Malayalam",
         url: "https://vidcdn.vidgyor.com/asianet-origin/liveabr/asianet-origin/live2/chunks.m3u8",
         program: "Gulf Samayam & Prime Entertainment"
       },
@@ -673,6 +688,7 @@
         logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
         group: "News",
         country: "IN",
+        language: "Malayalam",
         url: "https://vidcdn.vidgyor.com/asianet-origin/liveabr/asianet-origin/live2/chunks.m3u8",
         program: "Nonstop Live News Desk"
       },
@@ -682,6 +698,7 @@
         logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/NDTV_logo.svg/512px-NDTV_logo.svg.png",
         group: "News",
         country: "IN",
+        language: "English",
         url: "https://ndtv24x7elemarchana.akamaized.net/hls/live/2003678/ndtv24x7/master.m3u8",
         program: "The World 24x7 & Left Right & Centre"
       },
@@ -691,6 +708,7 @@
         logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/India_Today_logo.svg/512px-India_Today_logo.svg.png",
         group: "News",
         country: "IN",
+        language: "English",
         url: "https://feeds.intoday.in/hltapps/api/master.m3u8",
         program: "News Today with Rajdeep Sardesai"
       },
@@ -700,6 +718,7 @@
         logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/WION_logo.svg/512px-WION_logo.svg.png",
         group: "News",
         country: "IN",
+        language: "English",
         url: "https://wionnews-live.akamaized.net/hls/live/2034033/wion/master.m3u8",
         program: "Gravitas & Global Perspectives"
       },
@@ -709,6 +728,7 @@
         logo: "https://images.nasa.gov/images/nasa_logo-large.ee51e220.png",
         group: "Science",
         country: "US",
+        language: "English",
         url: "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8",
         program: "ISS Live Stream & Artemis Mission Briefing"
       },
@@ -718,6 +738,7 @@
         logo: "https://news.sky.com/assets/sky-news-logo.png",
         group: "News",
         country: "UK",
+        language: "English",
         url: "https://skynews-live.edgesuite.net/hls/live/2027209/skynews_live/master.m3u8",
         program: "Sky News at Ten & Global World Desk"
       },
@@ -727,6 +748,7 @@
         logo: "https://assets.bwbx.io/s3/javelin/public/hub/images/favicon-black-32x32.png",
         group: "News",
         country: "US",
+        language: "English",
         url: "https://bloomberg-p2p.akamaized.net/hls/live/2003299/quicktake/master.m3u8",
         program: "Markets Today & Global Economics"
       },
@@ -736,6 +758,7 @@
         logo: "https://static.france24.com/meta_og_twcards/F24_TW.png",
         group: "News",
         country: "FR",
+        language: "English",
         url: "https://static.france24.com/live/F24_EN_LO_HLS/live_tv.m3u8",
         program: "Live International News & Perspectives"
       },
@@ -745,6 +768,7 @@
         logo: "https://www.dw.com/manifest-icons/icon-192x192.png",
         group: "News",
         country: "DE",
+        language: "English",
         url: "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8",
         program: "DW News Live & Journal Report"
       },
@@ -754,6 +778,7 @@
         logo: "https://www.aljazeera.com/favicon_aje.ico",
         group: "News",
         country: "GLOBAL",
+        language: "English",
         url: "https://live-hls-web-aje.getaj.net/AJE/01.m3u8",
         program: "Newshour Worldwide & Documentaries"
       },
@@ -763,6 +788,7 @@
         logo: "https://www.redbull.com/v3/resources/images/favicons/favicon-196x196.png",
         group: "Sports",
         country: "GLOBAL",
+        language: "English",
         url: "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8",
         program: "Extreme Action Sports & F1 Highlights"
       },
@@ -772,6 +798,7 @@
         logo: "https://www.euronews.com/favicon-192x192.png",
         group: "News",
         country: "GLOBAL",
+        language: "English",
         url: "https://rakuten-euronews-1-gb.samsung.wurl.tv/playlist.m3u8",
         program: "European Headline Edition"
       }
@@ -1258,6 +1285,8 @@
       const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
       const region = regionFilter ? regionFilter.value : 'ALL';
       const category = categoryFilter ? categoryFilter.value : 'ALL';
+      const languageFilter = document.getElementById('language-filter');
+      const language = languageFilter ? languageFilter.value : 'ALL';
 
       state.filteredChannels = state.channels.filter(ch => {
         if (state.hideOfflineFeeds && state.offlineChannels && state.offlineChannels.has(ch.id)) {
@@ -1268,12 +1297,14 @@
           (ch.name && ch.name.toLowerCase().includes(query)) || 
           (ch.group && ch.group.toLowerCase().includes(query)) ||
           (ch.program && ch.program.toLowerCase().includes(query)) ||
-          (ch.country && ch.country.toLowerCase().includes(query));
+          (ch.country && ch.country.toLowerCase().includes(query)) ||
+          (ch.language && ch.language.toLowerCase().includes(query));
 
         const matchesRegion = region === 'ALL' || (ch.country && ch.country.toUpperCase() === region);
         const matchesCategory = category === 'ALL' || (ch.group && ch.group.toLowerCase().includes(category.toLowerCase()));
+        const matchesLanguage = language === 'ALL' || (ch.language && ch.language.toLowerCase().includes(language.toLowerCase()));
 
-        return matchesQuery && matchesRegion && matchesCategory;
+        return matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
       });
 
       state.tvLimit = 80;
@@ -1317,6 +1348,7 @@
                 </div>
                 <div class="text-[10px] text-slate-400 truncate flex items-center gap-1.5">
                   <span class="px-1 py-0.2 rounded bg-slate-800 text-[9px] text-slate-400 font-mono">${ch.country || 'TV'}</span>
+                  ${ch.language ? `<span class="px-1 py-0.2 rounded bg-brand-950/80 text-brand-300 border border-brand-800/50 text-[9px] font-mono">${ch.language}</span>` : ''}
                   <span>${ch.program || 'Live broadcast'}</span>
                 </div>
               </div>
@@ -1381,7 +1413,7 @@
       }).join('');
     }
 
-    async function loadM3uPlaylist(url, isBackground = false) {
+    async function loadM3uPlaylist(url, isBackground = false, defaultLanguage = null) {
       if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, "Fetching M3U Playlist...");
       try {
         let content = "";
@@ -1400,7 +1432,9 @@
           throw new Error('Invalid M3U playlist format');
         }
 
-        const parsedChannels = parseM3U(content);
+        if (!defaultLanguage && url.includes('/languages/mal.m3u')) defaultLanguage = 'Malayalam';
+
+        const parsedChannels = parseM3U(content, defaultLanguage);
         if (parsedChannels.length > 0) {
           const existingUrls = new Set(state.channels.map(c => c.url));
           const newChannels = parsedChannels.filter(c => !existingUrls.has(c.url));
@@ -1426,7 +1460,34 @@
       }
     }
 
-    function parseM3U(m3uText) {
+    function inferChannelLanguage(name = '', tvgId = '', group = '') {
+      const text = `${name} ${tvgId} ${group}`.toLowerCase();
+
+      if (/malayalam|kerala|kairali|asianet|manorama|mathrubhumi|mediaone|janam|flowers|amrita|kaumudy|reporter|zeekeralam|surya|kochu|ddmalayalam|darshana|goodness|shalom|harvest|acv|cmalayalam|anandtv/i.test(text)) {
+        return 'Malayalam';
+      }
+      if (/kannada|suvarna|publictv|udaya|kasthuri|powertv|rajnews.*kannada|ddchandana|colors.*kannada|zeekannada/i.test(text)) {
+        return 'Kannada';
+      }
+      if (/tamil|sun.*tv|kalaignar|vijay|zeetamil|polimer|puthiyathalaimurai|news7.*tamil|jaya|captain|lotus|rajtv|thanthai|ddpodhigai/i.test(text)) {
+        return 'Tamil';
+      }
+      if (/telugu|tv9.*telugu|ntv|abn|v6|sakshi|etv|tnews|zeetelugu|gemini|mahaa|10tv|ddyadagiri|ddsaptagiri/i.test(text)) {
+        return 'Telugu';
+      }
+      if (/hindi|aajtak|abpnews|indiatv|republicbharat|zeenews|ndtvindia|news18india|tv9bharatvarsh|ddnational|news24/i.test(text)) {
+        return 'Hindi';
+      }
+
+      const langMatch = text.match(/\b(malayalam|kannada|hindi|tamil|telugu|english|french|german|spanish|bengali|marathi|punjabi|gujarati|bhojpuri|odia|assamese)\b/i);
+      if (langMatch) {
+        return langMatch[1].charAt(0).toUpperCase() + langMatch[1].slice(1).toLowerCase();
+      }
+
+      return null;
+    }
+
+    function parseM3U(m3uText, defaultLanguage = null) {
       const lines = m3uText.split(/\r?\n/);
       const results = [];
       let currentInfo = null;
@@ -1441,6 +1502,12 @@
           const countryMatch = line.match(/tvg-country="([^"]+)"/i);
           if (countryMatch) currentInfo.country = countryMatch[1].toUpperCase();
 
+          const tvgIdMatch = line.match(/tvg-id="([^"]+)"/i);
+          if (tvgIdMatch) currentInfo.tvgId = tvgIdMatch[1];
+
+          const langMatch = line.match(/tvg-language="([^"]+)"/i) || line.match(/language="([^"]+)"/i);
+          if (langMatch) currentInfo.language = langMatch[1].trim();
+
           const groupMatch = line.match(/group-title="([^"]+)"/i);
           if (groupMatch) currentInfo.group = groupMatch[1];
 
@@ -1449,6 +1516,10 @@
             currentInfo.name = line.substring(commaIdx + 1).trim();
           } else {
             currentInfo.name = "Live Stream " + (results.length + 1);
+          }
+
+          if (!currentInfo.language) {
+            currentInfo.language = inferChannelLanguage(currentInfo.name, currentInfo.tvgId, currentInfo.group) || defaultLanguage;
           }
         } else if (line.startsWith('http://') || line.startsWith('https://')) {
           if (currentInfo) {
@@ -2091,6 +2162,8 @@
 
       if (searchInput) searchInput.addEventListener('input', filterChannels);
       if (regionFilter) regionFilter.addEventListener('change', filterChannels);
+      const languageFilter = document.getElementById('language-filter');
+      if (languageFilter) languageFilter.addEventListener('change', filterChannels);
       if (categoryFilter) categoryFilter.addEventListener('change', filterChannels);
 
       const filterActiveOnly = document.getElementById('filter-active-only');
@@ -2249,8 +2322,10 @@
         playChannel(0);
 
         loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
       } else {
         loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
         renderRemoteChannelsList();
         renderRemoteFavsList();
       }
