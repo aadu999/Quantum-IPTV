@@ -186,6 +186,19 @@
 
     <!-- Header Actions -->
     <div class="flex items-center gap-1.5 sm:gap-2">
+      <!-- Data Diagnostics & Quarantine Modal Button -->
+      <button id="btn-open-quarantine-modal" onclick="openQuarantineModal()" class="px-2.5 py-1 text-xs font-medium text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/50 rounded-md border border-amber-500/30 flex items-center gap-1.5 transition">
+        <i class="fa-solid fa-shield-virus text-amber-400"></i>
+        <span class="hidden sm:inline">Data Health</span>
+        <span id="badge-quarantine-count" class="hidden px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-bold text-[9px]">0</span>
+      </button>
+
+      <!-- Intelligent Discovery Surprise Me Button -->
+      <button id="btn-header-surprise" onclick="triggerSurpriseChannel()" class="px-2.5 py-1 text-xs font-semibold text-cyan-200 bg-cyan-950/50 hover:bg-cyan-900/60 rounded-md border border-cyan-500/30 flex items-center gap-1.5 transition shadow-sm" title="Surprise Me (Smart Discovery)">
+        <i class="fa-solid fa-wand-magic-sparkles text-cyan-400"></i>
+        <span class="hidden lg:inline">Surprise Me</span>
+      </button>
+
       <!-- M3U Playlist Loader Button -->
       <button id="btn-open-m3u-modal" class="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 rounded-md border border-slate-700/70 flex items-center gap-1.5 transition">
         <i class="fa-solid fa-link text-brand-400"></i>
@@ -485,6 +498,37 @@
             <span>Fetch & Parse</span>
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Quarantine Inspector & Data Diagnostics -->
+  <div id="modal-quarantine" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-2xl w-full shadow-2xl relative max-h-[85vh] flex flex-col">
+      <button id="btn-close-quarantine-modal" onclick="closeQuarantineModal()" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark text-sm"></i>
+      </button>
+
+      <div class="flex items-center gap-3 mb-1">
+        <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+          <i class="fa-solid fa-shield-virus text-base"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white tracking-tight">Content Quarantine & Data Diagnostics</h3>
+          <p class="text-xs text-slate-400">Inspecting ingested records, malformed lines, and circuit breaker states.</p>
+        </div>
+      </div>
+
+      <!-- Tabs: Quarantined Records vs Host Circuit Breakers vs Stream Telemetry -->
+      <div class="flex items-center gap-3 border-b border-slate-800 my-3 text-xs">
+        <button id="tab-quarantine-records" onclick="switchQuarantineTab('records')" class="pb-2 border-b-2 border-amber-500 text-amber-400 font-bold transition">Flagged Records</button>
+        <button id="tab-quarantine-breakers" onclick="switchQuarantineTab('breakers')" class="pb-2 border-b-2 border-transparent text-slate-400 font-semibold hover:text-white transition">Circuit Breakers</button>
+        <button id="tab-quarantine-telemetry" onclick="switchQuarantineTab('telemetry')" class="pb-2 border-b-2 border-transparent text-slate-400 font-semibold hover:text-white transition">Stream Telemetry</button>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div id="quarantine-content-area" class="flex-1 overflow-y-auto font-mono text-xs text-slate-300 space-y-2 pr-1">
+        <div class="p-4 text-center text-slate-500">No quarantined records logged yet.</div>
       </div>
     </div>
   </div>
@@ -912,6 +956,346 @@
     const unmuteBanner = document.getElementById('unmute-banner');
 
     /**
+     * QUANTUM IPTV PLATFORM V2.0 ARCHITECTURE
+     * Pillar 1: Data Robustness & Content Ingestion Pipeline
+     * Pillar 2: Playback Engine & Circuit Breakers
+     * Pillar 3: Content Intelligence & Quantum Decision Engine
+     */
+
+    // --- PILLAR 1: DATA ROBUSTNESS & INGESTION PIPELINE ---
+    class QuantumQuarantineManager {
+      constructor() {
+        this.quarantinedRecords = [];
+        this.ingestionJobs = [];
+      }
+
+      logJob(job) {
+        this.ingestionJobs.unshift(job);
+        if (this.ingestionJobs.length > 20) this.ingestionJobs.pop();
+        this.updateUIBadge();
+      }
+
+      quarantine(record, reason, sourceUrl) {
+        const entry = {
+          id: 'q_' + Math.random().toString(36).substr(2, 9),
+          record,
+          reason,
+          sourceUrl,
+          timestamp: new Date().toLocaleTimeString()
+        };
+        this.quarantinedRecords.unshift(entry);
+        if (this.quarantinedRecords.length > 200) this.quarantinedRecords.pop();
+        this.updateUIBadge();
+        return entry;
+      }
+
+      updateUIBadge() {
+        const badge = document.getElementById('badge-quarantine-count');
+        if (badge) {
+          badge.textContent = this.quarantinedRecords.length;
+          if (this.quarantinedRecords.length > 0) badge.classList.remove('hidden');
+        }
+      }
+    }
+    const quarantineManager = new QuantumQuarantineManager();
+
+    class QuantumEntityDeduplicator {
+      normalizeTitle(title = '') {
+        return title
+          .toLowerCase()
+          .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+          .replace(/\b(hd|fhd|uhd|4k|sd|720p|1080p|live|stream|uk|in|us|ca|au|fr|de)\b/gi, '')
+          .replace(/[^a-z0-9]/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      calculateMatchConfidence(ch1, ch2) {
+        if (ch1.url === ch2.url) return { confidence: 100, reason: 'EXACT_URL_MATCH' };
+        if (ch1.tvgId && ch2.tvgId && ch1.tvgId === ch2.tvgId) return { confidence: 95, reason: 'EXACT_EPG_ID_MATCH' };
+        
+        const norm1 = this.normalizeTitle(ch1.name);
+        const norm2 = this.normalizeTitle(ch2.name);
+        if (norm1 && norm1 === norm2) return { confidence: 90, reason: 'NORMALIZED_TITLE_MATCH' };
+
+        if (norm1 && norm2 && (norm1.includes(norm2) || norm2.includes(norm1))) {
+          return { confidence: 75, reason: 'SUBSTRING_TITLE_MATCH' };
+        }
+
+        return { confidence: 0, reason: 'NO_MATCH' };
+      }
+    }
+    const deduplicator = new QuantumEntityDeduplicator();
+
+    class QuantumSourceTracker {
+      constructor() {
+        this.snapshots = new Map();
+      }
+
+      recordSnapshot(sourceUrl, channels) {
+        const previous = this.snapshots.get(sourceUrl);
+        const currentMap = new Map(channels.map(c => [c.url, c]));
+
+        const diff = {
+          timestamp: new Date().toLocaleTimeString(),
+          sourceUrl,
+          total: channels.length,
+          added: 0,
+          removed: 0,
+          unchanged: 0
+        };
+
+        if (previous) {
+          const prevMap = new Map(previous.channels.map(c => [c.url, c]));
+          channels.forEach(c => {
+            if (prevMap.has(c.url)) diff.unchanged++;
+            else diff.added++;
+          });
+          previous.channels.forEach(c => {
+            if (!currentMap.has(c.url)) diff.removed++;
+          });
+        } else {
+          diff.added = channels.length;
+        }
+
+        this.snapshots.set(sourceUrl, { channels: [...channels], lastDiff: diff });
+        return diff;
+      }
+    }
+    const sourceTracker = new QuantumSourceTracker();
+
+
+    // --- PILLAR 2: PLAYBACK ENGINE & CIRCUIT BREAKERS ---
+    class QuantumCircuitBreaker {
+      constructor() {
+        this.hosts = new Map();
+        this.maxFailures = 3;
+        this.cooldownMs = 30000;
+      }
+
+      getHost(url) {
+        try {
+          return new URL(url).hostname;
+        } catch (e) {
+          return url;
+        }
+      }
+
+      isAvailable(url) {
+        const host = this.getHost(url);
+        const info = this.hosts.get(host);
+        if (!info) return true;
+
+        if (info.state === 'OPEN') {
+          if (Date.now() > info.nextAttempt) {
+            info.state = 'HALF_OPEN';
+            return true;
+          }
+          return false;
+        }
+        return true;
+      }
+
+      recordSuccess(url) {
+        const host = this.getHost(url);
+        this.hosts.set(host, { state: 'CLOSED', failures: 0, nextAttempt: 0 });
+      }
+
+      recordFailure(url) {
+        const host = this.getHost(url);
+        const info = this.hosts.get(host) || { state: 'CLOSED', failures: 0, nextAttempt: 0 };
+        info.failures += 1;
+
+        if (info.failures >= this.maxFailures) {
+          info.state = 'OPEN';
+          info.nextAttempt = Date.now() + this.cooldownMs;
+        }
+        this.hosts.set(host, info);
+      }
+    }
+    const circuitBreaker = new QuantumCircuitBreaker();
+
+    class QuantumNetworkEstimator {
+      constructor() {
+        this.samples = [];
+        this.lastBufferLevel = 0;
+        this.lastCheckTime = Date.now();
+        this.bufferSlope = 0;
+        this.bandwidth = 5000000;
+      }
+
+      recordSample(bytes, ms) {
+        if (ms <= 0) return;
+        const bps = (bytes * 8 * 1000) / ms;
+        this.samples.push(bps);
+        if (this.samples.length > 10) this.samples.shift();
+        this.bandwidth = this.samples.reduce((a, b) => a + b, 0) / this.samples.length;
+      }
+
+      updateBufferSlope(currentBufferSec) {
+        const now = Date.now();
+        const dt = (now - this.lastCheckTime) / 1000;
+        if (dt > 0.5) {
+          this.bufferSlope = (currentBufferSec - this.lastBufferLevel) / dt;
+          this.lastBufferLevel = currentBufferSec;
+          this.lastCheckTime = now;
+        }
+        return this.bufferSlope;
+      }
+    }
+    const networkEstimator = new QuantumNetworkEstimator();
+
+    class QuantumPlaybackMachine {
+      constructor() {
+        this.state = 'IDLE';
+        this.currentAttempt = null;
+        this.attempts = [];
+      }
+
+      transition(newState, details = {}) {
+        this.state = newState;
+        const hudStatus = document.getElementById('hud-engine-status');
+        if (hudStatus) hudStatus.textContent = newState;
+
+        if (this.currentAttempt) {
+          this.currentAttempt.events.push({ state: newState, time: Date.now(), ...details });
+        }
+      }
+
+      startAttempt(channel, url) {
+        this.currentAttempt = {
+          id: 'att_' + Math.random().toString(36).substr(2, 9),
+          channelId: channel ? channel.id : 'unknown',
+          channelName: channel ? channel.name : 'unknown',
+          url: url,
+          startedAt: Date.now(),
+          events: [],
+          outcome: null
+        };
+        this.transition('RESOLVING');
+      }
+
+      endAttempt(outcome, reason = '') {
+        if (!this.currentAttempt) return;
+        this.currentAttempt.outcome = outcome;
+        this.currentAttempt.reason = reason;
+        this.currentAttempt.endedAt = Date.now();
+        this.currentAttempt.durationMs = this.currentAttempt.endedAt - this.currentAttempt.startedAt;
+
+        this.attempts.unshift(this.currentAttempt);
+        if (this.attempts.length > 50) this.attempts.pop();
+
+        if (outcome === 'PLAYING' && this.currentAttempt.channelId) {
+          const ch = state.channels.find(c => c.id === this.currentAttempt.channelId);
+          if (ch) userProfile.recordWatchEvent(ch, Math.round(this.currentAttempt.durationMs / 1000));
+        }
+
+        this.currentAttempt = null;
+      }
+    }
+    const playbackMachine = new QuantumPlaybackMachine();
+
+
+    // --- PILLAR 3: USER PROFILE & QUANTUM DECISION ENGINE ---
+    class QuantumUserProfile {
+      constructor() {
+        this.profile = JSON.parse(localStorage.getItem('quantum_user_profile') || JSON.stringify({
+          genres: {},
+          languages: {},
+          channels: {},
+          watchHistory: [],
+          totalWatchTimeSec: 0
+        }));
+      }
+
+      save() {
+        localStorage.setItem('quantum_user_profile', JSON.stringify(this.profile));
+      }
+
+      recordWatchEvent(channel, durationSec) {
+        if (!channel || durationSec < 3) return;
+
+        const genre = channel.group || 'General';
+        const lang = channel.language || 'Unknown';
+
+        this.profile.genres[genre] = (this.profile.genres[genre] || 0) + durationSec;
+        this.profile.languages[lang] = (this.profile.languages[lang] || 0) + durationSec;
+        this.profile.channels[channel.id] = (this.profile.channels[channel.id] || 0) + 1;
+        this.profile.totalWatchTimeSec += durationSec;
+
+        this.profile.watchHistory.unshift({
+          id: channel.id,
+          name: channel.name,
+          timestamp: Date.now(),
+          durationSec
+        });
+        if (this.profile.watchHistory.length > 50) this.profile.watchHistory.pop();
+
+        this.save();
+      }
+
+      getTopGenres() {
+        return Object.entries(this.profile.genres)
+          .sort((a, b) => b[1] - a[1])
+          .map(entry => entry[0]);
+      }
+
+      getTopLanguages() {
+        return Object.entries(this.profile.languages)
+          .sort((a, b) => b[1] - a[1])
+          .map(entry => entry[0]);
+      }
+    }
+    const userProfile = new QuantumUserProfile();
+
+    class QuantumDecisionEngine {
+      calculateScore(channel) {
+        let score = 50;
+
+        const topGenres = userProfile.getTopGenres();
+        const topLangs = userProfile.getTopLanguages();
+
+        if (channel.group && topGenres.includes(channel.group)) {
+          score += 25 - (topGenres.indexOf(channel.group) * 5);
+        }
+        if (channel.language && topLangs.includes(channel.language)) {
+          score += 20 - (topLangs.indexOf(channel.language) * 4);
+        }
+
+        if (state.favorites && state.favorites.includes(channel.id)) score += 30;
+
+        if (state.offlineChannels && state.offlineChannels.has(channel.id)) score -= 100;
+        if (!circuitBreaker.isAvailable(channel.url)) score -= 80;
+
+        const hour = new Date().getHours();
+        if (hour >= 6 && hour < 12 && channel.group === 'News') score += 15;
+        if (hour >= 18 && hour < 23 && (channel.group === 'Entertainment' || channel.group === 'Sports')) score += 15;
+
+        return Math.max(0, score);
+      }
+
+      getRankedRecommendations(limit = 10) {
+        const candidates = state.channels.filter(c => {
+          return !state.offlineChannels.has(c.id) && circuitBreaker.isAvailable(c.url);
+        });
+
+        return candidates
+          .map(c => ({ channel: c, score: this.calculateScore(c) }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit)
+          .map(item => item.channel);
+      }
+
+      getRandomSurpriseChannel() {
+        const recommendations = this.getRankedRecommendations(15);
+        if (recommendations.length === 0) return state.channels[0];
+        const randomIndex = Math.floor(Math.random() * recommendations.length);
+        return recommendations[randomIndex];
+      }
+    }
+    const decisionEngine = new QuantumDecisionEngine();
+
+    /**
      * QuantumStream Adaptive Player Engine with Gap-Hopping & Autoplay Fallback
      */
     class QuantumStreamEngine {
@@ -995,13 +1379,23 @@
 
       load(url) {
         if (state.isRemoteClient) return;
+        
+        const curCh = state.filteredChannels[state.currentChannelIndex];
+        playbackMachine.startAttempt(curCh, url);
+
+        if (!circuitBreaker.isAvailable(url)) {
+          console.warn(`Circuit Breaker OPEN for host: ${circuitBreaker.getHost(url)}. Triggering fallback.`);
+          this.fallbackToProxy();
+          return;
+        }
+
         this.showSpinner(true, "Buffering Stream...");
+        playbackMachine.transition('BUFFERING');
         this.stallCount = 0;
         this.retryCount = 0;
         this.proxyCount = 0;
 
         let targetUrl = url;
-        // If app is served over HTTPS and stream is plain HTTP, auto-proxy via SSL wrapper to bypass Mixed Content blocking
         if (window.location.protocol === 'https:' && targetUrl.startsWith('http://')) {
           if (/http:\/\/\d+\.\d+\.\d+\.\d+/.test(url)) {
             targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
@@ -1028,12 +1422,20 @@
         this.showSpinner(false);
         hideOfflineOverlay();
         this.updateHudResolution();
+
+        const curCh = state.filteredChannels[state.currentChannelIndex];
+        if (curCh) {
+          circuitBreaker.recordSuccess(curCh.url);
+          playbackMachine.transition('PLAYING');
+        }
       }
 
       onStreamFailed(reason = "Playback error") {
         this.showSpinner(false);
         const curCh = state.filteredChannels[state.currentChannelIndex];
         if (curCh) {
+          circuitBreaker.recordFailure(curCh.url);
+          playbackMachine.endAttempt('FAILED', reason);
           state.offlineChannels.add(curCh.id);
           showOfflineOverlay(curCh);
         }
@@ -1042,6 +1444,9 @@
       fallbackToProxy() {
         const curCh = state.filteredChannels[state.currentChannelIndex];
         if (!curCh) return;
+        
+        circuitBreaker.recordFailure(curCh.url);
+        playbackMachine.transition('RECOVERING', { proxyAttempt: (this.proxyCount || 0) + 1 });
         
         this.proxyCount = (this.proxyCount || 0) + 1;
         let proxiedUrl;
@@ -1540,6 +1945,8 @@
 
     async function loadM3uPlaylist(url, isBackground = false, defaultLanguage = null) {
       if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, "Fetching M3U Playlist...");
+      const startTime = Date.now();
+
       try {
         let content = "";
         try {
@@ -1553,7 +1960,8 @@
           if (proxyResp.ok) content = await proxyResp.text();
         }
 
-        if (!content || !content.includes('#EXTINF')) {
+        if (!content || (!content.includes('#EXTINF') && !content.includes('#EXTM3U'))) {
+          quarantineManager.quarantine(url, "INVALID_PLAYLIST_HEADER", url);
           throw new Error('Invalid M3U playlist format');
         }
 
@@ -1565,19 +1973,36 @@
           else if (url.includes('/languages/hin.m3u')) defaultLanguage = 'Hindi';
         }
 
-        const parsedChannels = parseM3U(content, defaultLanguage);
+        const parsedChannels = parseM3U(content, defaultLanguage, url);
         if (parsedChannels.length > 0) {
+          const snapshotDiff = sourceTracker.recordSnapshot(url, parsedChannels);
+
           const existingMap = new Map(state.channels.map(c => [c.url, c]));
+          let acceptedCount = 0;
+          let duplicateCount = 0;
+
           parsedChannels.forEach(c => {
             if (existingMap.has(c.url)) {
+              duplicateCount++;
               const existing = existingMap.get(c.url);
               if (defaultLanguage) existing.language = defaultLanguage;
               else if (c.language) existing.language = c.language;
               if (c.logo && !existing.logo) existing.logo = c.logo;
               if (c.group && (!existing.group || existing.group === 'Undefined')) existing.group = c.group;
             } else {
+              acceptedCount++;
               state.channels.push(c);
             }
+          });
+
+          quarantineManager.logJob({
+            sourceUrl: url,
+            timestamp: new Date().toLocaleTimeString(),
+            durationMs: Date.now() - startTime,
+            recordsRead: parsedChannels.length,
+            recordsAccepted: acceptedCount,
+            duplicates: duplicateCount,
+            snapshotDiff
           });
           
           updateLanguageDropdown();
@@ -1604,23 +2029,18 @@
     function inferChannelLanguage(name = '', tvgId = '', group = '') {
       const text = `${name} ${tvgId} ${group}`.toLowerCase();
 
-      // Explicit Tamil Channel Patterns (Win TV, Village TV, Ultimate TV, Sun, Vijay, etc.)
       if (/tamil|wintv|win\s*tv|villagetv|village\s*tv|ultimatetv|ultimate\s*tv|sun\s*tv|kalaignar|vijay|zeetamil|polimer|puthiyathalaimurai|news7|jaya|captain|lotus|rajtv|thanthai|ddpodhigai|vettri|makkal|vendhar|isaiaruvi|seithigal|sirippoli|vasanth|chithiram|pepper|mega\s*tv|murasu/i.test(text)) {
         return 'Tamil';
       }
-      // Explicit Malayalam Channel Patterns
       if (/malayalam|kerala|kairali|asianet|manorama|mathrubhumi|mediaone|janam|flowers|amrita|kaumudy|reporter|zeekeralam|surya|kochu|ddmalayalam|darshana|goodness|shalom|harvest|acv|cmalayalam|anandtv/i.test(text)) {
         return 'Malayalam';
       }
-      // Explicit Kannada Channel Patterns
       if (/kannada|suvarna|publictv|public\s*tv|udaya|kasthuri|powertv|power\s*tv|rajnews.*kannada|ddchandana|colors.*kannada|zeekannada|bTV|vistara/i.test(text)) {
         return 'Kannada';
       }
-      // Explicit Telugu Channel Patterns (\b boundaries required so "wintv" does NOT match "ntv")
       if (/telugu|tv9.*telugu|\bntv\b|\babn\b|\bv6\b|sakshi|\betv\b|tnews|t\s*news|zeetelugu|gemini|mahaa|\b10tv\b|\b99tv\b|\b6tv\b|ddyadagiri|ddsaptagiri|subhavaartha|bhakthi|svbc|hmtv|prime9|studio\s*n/i.test(text)) {
         return 'Telugu';
       }
-      // Explicit Hindi Channel Patterns
       if (/hindi|aajtak|abpnews|indiatv|republicbharat|zeenews|ndtvindia|news18india|tv9bharatvarsh|ddnational|news24/i.test(text)) {
         return 'Hindi';
       }
@@ -1633,28 +2053,39 @@
       return null;
     }
 
-    function parseM3U(m3uText, defaultLanguage = null) {
-      const lines = m3uText.split(/\r?\n/);
+    function parseM3U(m3uText, defaultLanguage = null, sourceUrl = '') {
+      if (!m3uText) return [];
+      const cleanText = m3uText.replace(/^\uFEFF/, '');
+      const lines = cleanText.split(/\r?\n/);
       const results = [];
       let currentInfo = null;
 
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+        let line = lines[i].trim();
+        if (!line) continue;
+
+        // Giant line protection
+        if (line.length > 10000) {
+          quarantineManager.quarantine(`Line ${i+1} exceeds 10k chars`, "GIANT_LINE_REJECTED", sourceUrl);
+          continue;
+        }
+
         if (line.startsWith('#EXTINF:')) {
           currentInfo = {};
-          const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
+          
+          const logoMatch = line.match(/tvg-logo="([^"]+)"/i) || line.match(/tvg-logo=([^\s,]+)/i);
           if (logoMatch) currentInfo.logo = logoMatch[1];
 
-          const countryMatch = line.match(/tvg-country="([^"]+)"/i);
+          const countryMatch = line.match(/tvg-country="([^"]+)"/i) || line.match(/tvg-country=([^\s,]+)/i);
           if (countryMatch) currentInfo.country = countryMatch[1].toUpperCase();
 
-          const tvgIdMatch = line.match(/tvg-id="([^"]+)"/i);
+          const tvgIdMatch = line.match(/tvg-id="([^"]+)"/i) || line.match(/tvg-id=([^\s,]+)/i);
           if (tvgIdMatch) currentInfo.tvgId = tvgIdMatch[1];
 
-          const langMatch = line.match(/tvg-language="([^"]+)"/i) || line.match(/language="([^"]+)"/i);
+          const langMatch = line.match(/tvg-language="([^"]+)"/i) || line.match(/language="([^"]+)"/i) || line.match(/tvg-language=([^\s,]+)/i);
           if (langMatch) currentInfo.language = langMatch[1].trim();
 
-          const groupMatch = line.match(/group-title="([^"]+)"/i);
+          const groupMatch = line.match(/group-title="([^"]+)"/i) || line.match(/group-title=([^\s,]+)/i);
           if (groupMatch) currentInfo.group = groupMatch[1];
 
           const commaIdx = line.lastIndexOf(',');
@@ -1674,7 +2105,22 @@
             currentInfo.program = currentInfo.group ? `${currentInfo.group} Live Stream` : "Broadcast Program";
             results.push(currentInfo);
             currentInfo = null;
+          } else {
+            // URL line without #EXTINF header
+            const standaloneName = `Stream ${results.length + 1}`;
+            const standaloneCh = {
+              id: generateChannelId(standaloneName, line),
+              name: standaloneName,
+              url: line,
+              language: defaultLanguage || inferChannelLanguage(standaloneName),
+              group: 'Imported',
+              program: 'Live Stream'
+            };
+            results.push(standaloneCh);
           }
+        } else if (!line.startsWith('#')) {
+          // Unrecognized malformed line
+          quarantineManager.quarantine(line.substring(0, 100), "MALFORMED_LINE", sourceUrl);
         }
       }
       return results;
@@ -2438,11 +2884,108 @@
       });
     }
 
+    function openQuarantineModal() {
+      const modal = document.getElementById('modal-quarantine');
+      if (modal) modal.classList.remove('hidden');
+      switchQuarantineTab('records');
+    }
+
+    function closeQuarantineModal() {
+      const modal = document.getElementById('modal-quarantine');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    let activeQuarantineTab = 'records';
+    function switchQuarantineTab(tabName) {
+      activeQuarantineTab = tabName;
+      ['records', 'breakers', 'telemetry'].forEach(t => {
+        const btn = document.getElementById(`tab-quarantine-${t}`);
+        if (btn) {
+          if (t === tabName) {
+            btn.className = "pb-2 border-b-2 border-amber-500 text-amber-400 font-bold transition";
+          } else {
+            btn.className = "pb-2 border-b-2 border-transparent text-slate-400 font-semibold hover:text-white transition";
+          }
+        }
+      });
+      renderQuarantineTab();
+    }
+
+    function renderQuarantineTab() {
+      const area = document.getElementById('quarantine-content-area');
+      if (!area) return;
+
+      if (activeQuarantineTab === 'records') {
+        const records = quarantineManager.quarantinedRecords;
+        if (records.length === 0) {
+          area.innerHTML = `<div class="p-6 text-center text-slate-500 font-sans text-xs">No quarantined records logged. Parser is operating cleanly.</div>`;
+          return;
+        }
+        area.innerHTML = records.map(r => `
+          <div class="p-2.5 bg-slate-950/70 rounded-lg border border-amber-500/20 flex flex-col gap-1">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">${r.reason}</span>
+              <span class="text-slate-500">${r.timestamp}</span>
+            </div>
+            <div class="text-[11px] text-slate-200 truncate">${r.record}</div>
+            <div class="text-[9px] text-slate-500 truncate">${r.sourceUrl}</div>
+          </div>
+        `).join('');
+      } else if (activeQuarantineTab === 'breakers') {
+        const entries = Array.from(circuitBreaker.hosts.entries());
+        if (entries.length === 0) {
+          area.innerHTML = `<div class="p-6 text-center text-slate-500 font-sans text-xs">All host endpoints healthy. Circuit breakers closed.</div>`;
+          return;
+        }
+        area.innerHTML = entries.map(([host, info]) => `
+          <div class="p-2.5 bg-slate-950/70 rounded-lg border border-slate-800 flex items-center justify-between">
+            <div>
+              <div class="text-xs font-bold text-white">${host}</div>
+              <div class="text-[10px] text-slate-400">Failures: ${info.failures}</div>
+            </div>
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${info.state === 'OPEN' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}">${info.state}</span>
+          </div>
+        `).join('');
+      } else if (activeQuarantineTab === 'telemetry') {
+        const attempts = playbackMachine.attempts;
+        if (attempts.length === 0) {
+          area.innerHTML = `<div class="p-6 text-center text-slate-500 font-sans text-xs">No stream attempt telemetry logged yet.</div>`;
+          return;
+        }
+        area.innerHTML = attempts.map(att => `
+          <div class="p-2.5 bg-slate-950/70 rounded-lg border border-slate-800 flex flex-col gap-1">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="font-bold text-white truncate max-w-[200px]">${att.channelName}</span>
+              <span class="px-1.5 py-0.5 rounded font-bold ${att.outcome === 'PLAYING' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}">${att.outcome}</span>
+            </div>
+            <div class="text-[10px] text-slate-400 flex items-center gap-3">
+              <span>Duration: ${(att.durationMs / 1000).toFixed(1)}s</span>
+              <span>Events: ${att.events.length}</span>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function triggerSurpriseChannel() {
+      const surprise = decisionEngine.getRandomSurpriseChannel();
+      if (!surprise) return;
+
+      const idx = state.filteredChannels.findIndex(c => c.id === surprise.id);
+      if (idx !== -1) {
+        playChannel(idx);
+      } else {
+        tuneToChannel(surprise);
+      }
+    }
+
     function closeModals() {
       const modalRemote = document.getElementById('modal-remote');
       const modalM3u = document.getElementById('modal-m3u');
+      const modalQuarantine = document.getElementById('modal-quarantine');
       if (modalRemote) modalRemote.classList.add('hidden');
       if (modalM3u) modalM3u.classList.add('hidden');
+      if (modalQuarantine) modalQuarantine.classList.add('hidden');
     }
 
     function copyToClipboard(text) {
