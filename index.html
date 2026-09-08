@@ -2706,8 +2706,20 @@
       }
     }
 
+    let lastToggleTime = 0;
     function togglePlayPause() {
       if (!video || state.isRemoteClient) return;
+      
+      const now = Date.now();
+      if (now - lastToggleTime < 300) {
+        return;
+      }
+      lastToggleTime = now;
+
+      if (document.activeElement && document.activeElement.tagName === 'BUTTON') {
+        document.activeElement.blur();
+      }
+
       if (video.paused) {
         video.play().catch(() => {});
         wakeControls();
@@ -4101,8 +4113,20 @@
         switch (e.code) {
           case 'Space':
           case 'KeyK':
+          case 'MediaPlayPause':
+          case 'MediaPlay':
+          case 'MediaPause':
             e.preventDefault();
             togglePlayPause();
+            break;
+          case 'Enter':
+          case 'NumpadEnter':
+          case 'Select':
+            // Only trigger togglePlayPause on Enter if no interactive button is focused
+            if (!document.activeElement || document.activeElement === document.body || document.activeElement === video) {
+              e.preventDefault();
+              togglePlayPause();
+            }
             break;
           case 'KeyF':
             toggleFullscreenMode();
@@ -4135,15 +4159,19 @@
             }
             break;
           case 'KeyL':
+          case 'MediaFastForward':
             seekVideo(10);
             break;
           case 'KeyJ':
+          case 'MediaRewind':
             seekVideo(-10);
             break;
           case 'KeyN':
+          case 'MediaTrackNext':
             if (state.currentChannelIndex < state.filteredChannels.length - 1) playChannel(state.currentChannelIndex + 1);
             break;
           case 'KeyP':
+          case 'MediaTrackPrevious':
             if (state.currentChannelIndex > 0) playChannel(state.currentChannelIndex - 1);
             break;
         }
