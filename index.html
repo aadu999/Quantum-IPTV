@@ -391,7 +391,15 @@
             <option value="Entertainment">Entertainment</option>
             <option value="Sports">Sports</option>
             <option value="Science">Science & Tech</option>
-          </select>
+        </div>
+
+        <!-- Content Type Filter Pills: Live TV, VOD Movies, Series, Catchup -->
+        <div class="flex items-center gap-1 text-[10px] overflow-x-auto pb-0.5 no-scrollbar">
+          <button id="pill-type-all" onclick="filterContentType('ALL')" class="px-2 py-0.5 rounded-full bg-brand-600 text-white font-semibold whitespace-nowrap transition">All</button>
+          <button id="pill-type-live" onclick="filterContentType('live')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">Live TV</button>
+          <button id="pill-type-vod" onclick="filterContentType('vod')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">VOD Movies</button>
+          <button id="pill-type-series" onclick="filterContentType('series')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">TV Series</button>
+          <button id="pill-type-catchup" onclick="filterContentType('catchup')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">Catchup Archives</button>
         </div>
       </div>
 
@@ -454,20 +462,29 @@
     </div>
   </div>
 
-  <!-- Modal: Custom M3U Playlist Input -->
+  <!-- Modal: Enterprise Provider & Playlist Manager -->
   <div id="modal-m3u" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl relative">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-lg w-full shadow-2xl relative flex flex-col">
       <button id="btn-close-m3u-modal" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
         <i class="fa-solid fa-xmark text-sm"></i>
       </button>
 
       <h3 class="text-base font-bold text-white flex items-center gap-2">
         <i class="fa-solid fa-satellite text-brand-400"></i>
-        <span>Load M3U Stream Playlist</span>
+        <span>Import Streams & Providers</span>
       </h3>
-      <p class="text-xs text-slate-400 mt-1 mb-4">Select from preconfigured regional bundles or paste any custom M3U playlist URL.</p>
+      <p class="text-xs text-slate-400 mt-1 mb-3">Connect M3U Playlists, Xtream Codes API, Stalker Portals, or XMLTV EPG guides.</p>
 
-      <div class="flex flex-col gap-3 text-xs">
+      <!-- Provider Tabs -->
+      <div class="flex items-center gap-2 border-b border-slate-800 mb-4 text-xs">
+        <button id="tab-provider-m3u" onclick="switchProviderTab('m3u')" class="pb-2 border-b-2 border-brand-500 text-brand-400 font-bold transition">M3U Playlist</button>
+        <button id="tab-provider-xtream" onclick="switchProviderTab('xtream')" class="pb-2 border-b-2 border-transparent text-slate-400 hover:text-white font-semibold transition">Xtream API</button>
+        <button id="tab-provider-stalker" onclick="switchProviderTab('stalker')" class="pb-2 border-b-2 border-transparent text-slate-400 hover:text-white font-semibold transition">Stalker Portal</button>
+        <button id="tab-provider-xmltv" onclick="switchProviderTab('xmltv')" class="pb-2 border-b-2 border-transparent text-slate-400 hover:text-white font-semibold transition">XMLTV EPG</button>
+      </div>
+
+      <!-- Tab Content: M3U -->
+      <div id="provider-section-m3u" class="flex flex-col gap-3 text-xs">
         <div>
           <label class="block text-[11px] font-semibold text-slate-300 mb-1">M3U Playlist URL</label>
           <input id="input-m3u-url" type="text" value="https://iptv-org.github.io/iptv/countries/in.m3u" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
@@ -496,6 +513,65 @@
           <button id="btn-fetch-m3u" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg shadow-md shadow-brand-500/20 transition flex items-center gap-1.5">
             <i class="fa-solid fa-cloud-arrow-down"></i>
             <span>Fetch & Parse</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab Content: Xtream API -->
+      <div id="provider-section-xtream" class="flex flex-col gap-3 text-xs hidden">
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Server Host URL</label>
+          <input id="input-xtream-host" type="text" placeholder="http://example.com:8080" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Username</label>
+            <input id="input-xtream-user" type="text" placeholder="user123" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Password</label>
+            <input id="input-xtream-pass" type="password" placeholder="••••••••" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+          </div>
+        </div>
+        <div class="mt-2 flex items-center justify-end gap-2">
+          <button onclick="closeM3uModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Cancel</button>
+          <button onclick="connectXtreamApi()" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg shadow-md shadow-brand-500/20 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-server"></i>
+            <span>Connect Xtream</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab Content: Stalker Portal -->
+      <div id="provider-section-stalker" class="flex flex-col gap-3 text-xs hidden">
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Stalker Portal URL</label>
+          <input id="input-stalker-url" type="text" placeholder="http://example.com/stalker_portal/c/" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Device MAC Address</label>
+          <input id="input-stalker-mac" type="text" placeholder="00:1A:79:XX:XX:XX" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div class="mt-2 flex items-center justify-end gap-2">
+          <button onclick="closeM3uModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Cancel</button>
+          <button onclick="connectStalkerPortal()" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg shadow-md shadow-brand-500/20 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-barcode"></i>
+            <span>Connect Stalker</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab Content: XMLTV EPG -->
+      <div id="provider-section-xmltv" class="flex flex-col gap-3 text-xs hidden">
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">XMLTV Guide Feed URL (.xml)</label>
+          <input id="input-xmltv-url" type="text" placeholder="https://epg.example.com/guide.xml" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div class="mt-2 flex items-center justify-end gap-2">
+          <button onclick="closeM3uModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Cancel</button>
+          <button onclick="loadXmltvFeed()" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg shadow-md shadow-brand-500/20 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-list-check"></i>
+            <span>Import EPG Guide</span>
           </button>
         </div>
       </div>
@@ -1296,6 +1372,193 @@
     const decisionEngine = new QuantumDecisionEngine();
 
     /**
+     * MULTI-SOURCE STREAM FUSION & BEST SOURCE SELECTOR
+     */
+    class QuantumSourceFusionEngine {
+      constructor() {
+        this.fusedMap = new Map();
+      }
+
+      fuseChannel(channelObj, sourceName = 'Default Playlist') {
+        const normTitle = deduplicator.normalizeTitle(channelObj.name);
+        const key = channelObj.tvgId ? channelObj.tvgId.toLowerCase() : (normTitle || channelObj.url);
+
+        const streamSource = {
+          url: channelObj.url,
+          sourceName: sourceName,
+          quality: channelObj.quality || 'HD',
+          addedAt: Date.now()
+        };
+
+        if (this.fusedMap.has(key)) {
+          const existing = this.fusedMap.get(key);
+          const hasUrl = existing.sources.some(s => s.url === channelObj.url);
+          if (!hasUrl) {
+            existing.sources.push(streamSource);
+          }
+          if (channelObj.logo && (!existing.logo || existing.logo.includes('via.placeholder'))) existing.logo = channelObj.logo;
+          if (channelObj.language && !existing.language) existing.language = channelObj.language;
+          if (channelObj.group && (!existing.group || existing.group === 'Live')) existing.group = channelObj.group;
+          return existing;
+        } else {
+          const merged = {
+            ...channelObj,
+            sources: [streamSource],
+            activeSourceIndex: 0
+          };
+          this.fusedMap.set(key, merged);
+          return merged;
+        }
+      }
+
+      getBestSource(channel) {
+        if (!channel || !channel.sources || channel.sources.length === 0) {
+          return { url: channel.url, sourceName: 'Primary' };
+        }
+        for (let i = 0; i < channel.sources.length; i++) {
+          const src = channel.sources[i];
+          if (circuitBreaker.isAvailable(src.url)) {
+            channel.activeSourceIndex = i;
+            return src;
+          }
+        }
+        channel.activeSourceIndex = 0;
+        return channel.sources[0];
+      }
+    }
+    const sourceFusionEngine = new QuantumSourceFusionEngine();
+
+    /**
+     * ENTERPRISE PROVIDER CONNECTORS (Xtream Codes API, Stalker Portal, XMLTV EPG)
+     */
+    class QuantumXtreamConnector {
+      async fetchXtreamPlaylist(host, username, password) {
+        const cleanHost = host.replace(/\/+$/, '');
+        const apiUrl = `${cleanHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+        
+        try {
+          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
+          const resp = await fetch(proxyUrl);
+          if (!resp.ok) throw new Error('Xtream API host unreachable');
+          const data = await resp.json();
+
+          if (data.user_info && data.user_info.auth === 0) {
+            throw new Error('Xtream Credentials Rejected');
+          }
+
+          // Fetch Live Streams
+          const liveUrl = `${cleanHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
+          const liveResp = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(liveUrl)}`);
+          let addedCount = 0;
+          if (liveResp.ok) {
+            const liveStreams = await liveResp.json();
+            liveStreams.forEach(item => {
+              const streamUrl = `${cleanHost}/live/${username}/${password}/${item.stream_id}.m3u8`;
+              const ch = {
+                id: 'xt_live_' + item.stream_id,
+                name: item.name,
+                url: streamUrl,
+                logo: item.stream_icon,
+                group: item.category_name || 'Xtream Live',
+                language: inferChannelLanguage(item.name),
+                type: 'live',
+                tvgId: item.epg_channel_id
+              };
+              const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
+              if (!state.channels.includes(fused)) state.channels.push(fused);
+              addedCount++;
+            });
+          }
+
+          // Fetch VOD Movies
+          const vodUrl = `${cleanHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_streams`;
+          const vodResp = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(vodUrl)}`);
+          if (vodResp.ok) {
+            const vodStreams = await vodResp.json();
+            vodStreams.slice(0, 100).forEach(item => {
+              const vodStreamUrl = `${cleanHost}/movie/${username}/${password}/${item.stream_id}.${item.container_extension || 'mp4'}`;
+              const ch = {
+                id: 'xt_vod_' + item.stream_id,
+                name: item.name,
+                url: vodStreamUrl,
+                logo: item.stream_icon,
+                group: 'VOD Movies',
+                language: inferChannelLanguage(item.name),
+                type: 'vod',
+                rating: item.rating
+              };
+              const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream VOD');
+              if (!state.channels.includes(fused)) state.channels.push(fused);
+              addedCount++;
+            });
+          }
+
+          filterChannels();
+          return addedCount;
+        } catch (e) {
+          console.error('Xtream Connector Error:', e);
+          throw e;
+        }
+      }
+    }
+    const xtreamConnector = new QuantumXtreamConnector();
+
+    class QuantumStalkerConnector {
+      async fetchStalkerPortal(portalUrl, macAddress) {
+        const cleanPortal = portalUrl.replace(/\/+$/, '');
+        const handshakeUrl = `${cleanPortal}?type=stb&action=handshake&mac=${encodeURIComponent(macAddress)}`;
+        try {
+          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(handshakeUrl)}`;
+          const resp = await fetch(proxyUrl);
+          if (!resp.ok) throw new Error('Stalker Portal handshake failed');
+          return true;
+        } catch (e) {
+          console.error('Stalker Connector Error:', e);
+          throw e;
+        }
+      }
+    }
+    const stalkerConnector = new QuantumStalkerConnector();
+
+    class QuantumXMLTVParser {
+      async loadExternalEPG(xmltvUrl) {
+        try {
+          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(xmltvUrl)}`;
+          const resp = await fetch(proxyUrl);
+          if (!resp.ok) throw new Error('XMLTV download failed');
+          const xmlText = await resp.text();
+          
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+          const programmes = xmlDoc.getElementsByTagName("programme");
+
+          let mappedCount = 0;
+          for (let i = 0; i < Math.min(programmes.length, 500); i++) {
+            const p = programmes[i];
+            const chId = p.getAttribute("channel");
+            const titleEl = p.getElementsByTagName("title")[0];
+            const title = titleEl ? titleEl.textContent : "Program";
+
+            if (chId) {
+              const matchedCh = state.channels.find(c => (c.tvgId && c.tvgId.toLowerCase() === chId.toLowerCase()) || c.name.toLowerCase().includes(chId.toLowerCase()));
+              if (matchedCh) {
+                matchedCh.program = title;
+                mappedCount++;
+              }
+            }
+          }
+          filterChannels();
+          generateSyntheticEpg();
+          return mappedCount;
+        } catch (e) {
+          console.error('XMLTV Parser Error:', e);
+          throw e;
+        }
+      }
+    }
+    const xmltvParser = new QuantumXMLTVParser();
+
+    /**
      * QuantumStream Adaptive Player Engine with Gap-Hopping & Autoplay Fallback
      */
     class QuantumStreamEngine {
@@ -1446,6 +1709,19 @@
         if (!curCh) return;
         
         circuitBreaker.recordFailure(curCh.url);
+
+        // Multi-Source In-Channel Failover: try backup stream source first!
+        if (curCh.sources && curCh.sources.length > 1 && (curCh.activeSourceIndex || 0) < curCh.sources.length - 1) {
+          curCh.activeSourceIndex = (curCh.activeSourceIndex || 0) + 1;
+          const backupSource = curCh.sources[curCh.activeSourceIndex];
+          console.log(`Failing over to Source ${curCh.activeSourceIndex + 1} (${backupSource.sourceName}) for ${curCh.name}`);
+          playbackMachine.transition('RECOVERING', { multiSourceFailover: true, sourceIndex: curCh.activeSourceIndex });
+          this.showSpinner(true, `Failing over to Source ${curCh.activeSourceIndex + 1}...`);
+          this.proxyCount = 0;
+          this.load(backupSource.url);
+          return;
+        }
+
         playbackMachine.transition('RECOVERING', { proxyAttempt: (this.proxyCount || 0) + 1 });
         
         this.proxyCount = (this.proxyCount || 0) + 1;
@@ -1783,17 +2059,40 @@
       }
     }
 
+    function filterContentType(type) {
+      state.contentTypeFilter = type;
+      const pills = ['all', 'live', 'vod', 'series', 'catchup'];
+      pills.forEach(p => {
+        const btn = document.getElementById(`pill-type-${p}`);
+        if (btn) {
+          if (p === type.toLowerCase() || (type === 'ALL' && p === 'all')) {
+            btn.className = 'px-2 py-0.5 rounded-full bg-brand-600 text-white font-semibold whitespace-nowrap transition';
+          } else {
+            btn.className = 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition';
+          }
+        }
+      });
+      filterChannels();
+    }
+
     function filterChannels() {
       const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
       const region = regionFilter ? regionFilter.value : 'ALL';
       const category = categoryFilter ? categoryFilter.value : 'ALL';
       const languageFilter = document.getElementById('language-filter');
       const language = languageFilter ? languageFilter.value : 'ALL';
+      const typeFilter = state.contentTypeFilter || 'ALL';
 
       state.filteredChannels = state.channels.filter(ch => {
         if (state.hideOfflineFeeds && state.offlineChannels && state.offlineChannels.has(ch.id)) {
           return false;
         }
+
+        const matchesType = typeFilter === 'ALL' || 
+          (typeFilter === 'live' && (!ch.type || ch.type === 'live')) ||
+          (typeFilter === 'vod' && ch.type === 'vod') ||
+          (typeFilter === 'series' && ch.type === 'series') ||
+          (typeFilter === 'catchup' && (ch.catchup || ch.catchupDays));
 
         const matchesQuery = !query || 
           (ch.name && ch.name.toLowerCase().includes(query)) || 
@@ -1806,7 +2105,22 @@
         const matchesCategory = category === 'ALL' || (ch.group && ch.group.toLowerCase().includes(category.toLowerCase()));
         const matchesLanguage = language === 'ALL' || (ch.language && ch.language.toLowerCase().includes(language.toLowerCase()));
 
-        return matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
+        return matchesType && matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
+      });
+
+      // ASIANET NEWS PINNED PRIORITY SORTING
+      state.filteredChannels.sort((a, b) => {
+        const aIsAsianetNews = /asianet\s*news/i.test(a.name);
+        const bIsAsianetNews = /asianet\s*news/i.test(b.name);
+        if (aIsAsianetNews && !bIsAsianetNews) return -1;
+        if (!aIsAsianetNews && bIsAsianetNews) return 1;
+
+        const aIsAsianet = /asianet/i.test(a.name);
+        const bIsAsianet = /asianet/i.test(b.name);
+        if (aIsAsianet && !bIsAsianet) return -1;
+        if (!aIsAsianet && bIsAsianet) return 1;
+
+        return 0;
       });
 
       state.tvLimit = 80;
@@ -1837,6 +2151,7 @@
         const isActive = idx === state.currentChannelIndex;
         const isFav = state.favorites.includes(ch.id);
         const isOffline = state.offlineChannels ? state.offlineChannels.has(ch.id) : false;
+        const sourceCount = ch.sources ? ch.sources.length : 1;
 
         return `
           <div onclick="playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${isActive ? 'bg-brand-950/60 border-l-4 border-brand-500 pl-2' : ''}">
@@ -1846,6 +2161,7 @@
                 <div class="text-xs font-semibold ${isActive ? 'text-brand-400' : 'text-slate-200'} truncate flex items-center gap-1.5">
                   <span>${ch.name}</span>
                   ${isActive ? '<span class="w-1.5 h-1.5 rounded-full bg-brand-400 animate-ping"></span>' : ''}
+                  ${sourceCount > 1 ? `<span class="px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-mono">${sourceCount} Streams</span>` : ''}
                   ${isOffline ? '<span class="text-[9px] px-1 py-0.2 rounded bg-rose-950/80 text-rose-400 border border-rose-800/50 font-mono">Offline</span>' : ''}
                 </div>
                 <div class="text-[10px] text-slate-400 truncate flex items-center gap-1.5">
@@ -1977,21 +2293,16 @@
         if (parsedChannels.length > 0) {
           const snapshotDiff = sourceTracker.recordSnapshot(url, parsedChannels);
 
-          const existingMap = new Map(state.channels.map(c => [c.url, c]));
           let acceptedCount = 0;
           let duplicateCount = 0;
 
           parsedChannels.forEach(c => {
-            if (existingMap.has(c.url)) {
-              duplicateCount++;
-              const existing = existingMap.get(c.url);
-              if (defaultLanguage) existing.language = defaultLanguage;
-              else if (c.language) existing.language = c.language;
-              if (c.logo && !existing.logo) existing.logo = c.logo;
-              if (c.group && (!existing.group || existing.group === 'Undefined')) existing.group = c.group;
-            } else {
+            const fused = sourceFusionEngine.fuseChannel(c, url);
+            if (!state.channels.includes(fused)) {
               acceptedCount++;
-              state.channels.push(c);
+              state.channels.push(fused);
+            } else {
+              duplicateCount++;
             }
           });
 
@@ -2820,6 +3131,84 @@
       if (btnOpenM3u) btnOpenM3u.addEventListener('click', () => modalM3u.classList.remove('hidden'));
       if (btnCloseM3u) btnCloseM3u.addEventListener('click', () => modalM3u.classList.add('hidden'));
       if (btnCancelM3u) btnCancelM3u.addEventListener('click', () => modalM3u.classList.add('hidden'));
+
+      window.closeM3uModal = function() {
+        if (modalM3u) modalM3u.classList.add('hidden');
+      };
+
+      window.switchProviderTab = function(tab) {
+        const tabs = ['m3u', 'xtream', 'stalker', 'xmltv'];
+        tabs.forEach(t => {
+          const tabBtn = document.getElementById(`tab-provider-${t}`);
+          const sec = document.getElementById(`provider-section-${t}`);
+          if (tabBtn && sec) {
+            if (t === tab) {
+              tabBtn.className = 'pb-2 border-b-2 border-brand-500 text-brand-400 font-bold transition';
+              sec.classList.remove('hidden');
+            } else {
+              tabBtn.className = 'pb-2 border-b-2 border-transparent text-slate-400 hover:text-white font-semibold transition';
+              sec.classList.add('hidden');
+            }
+          }
+        });
+      };
+
+      window.connectXtreamApi = async function() {
+        const host = document.getElementById('input-xtream-host')?.value.trim();
+        const user = document.getElementById('input-xtream-user')?.value.trim();
+        const pass = document.getElementById('input-xtream-pass')?.value.trim();
+        if (!host || !user || !pass) {
+          alert('Please enter Host, Username, and Password for Xtream API.');
+          return;
+        }
+        engine.showSpinner(true, 'Connecting to Xtream API...');
+        try {
+          const count = await xtreamConnector.fetchXtreamPlaylist(host, user, pass);
+          engine.showSpinner(false);
+          closeM3uModal();
+          alert(`Successfully imported ${count} streams from Xtream API!`);
+        } catch (e) {
+          engine.showSpinner(false);
+          alert(`Xtream API Error: ${e.message}`);
+        }
+      };
+
+      window.connectStalkerPortal = async function() {
+        const portal = document.getElementById('input-stalker-url')?.value.trim();
+        const mac = document.getElementById('input-stalker-mac')?.value.trim();
+        if (!portal || !mac) {
+          alert('Please enter Stalker Portal URL and Device MAC address.');
+          return;
+        }
+        engine.showSpinner(true, 'Connecting Stalker Portal...');
+        try {
+          await stalkerConnector.fetchStalkerPortal(portal, mac);
+          engine.showSpinner(false);
+          closeM3uModal();
+          alert('Stalker Portal connected successfully!');
+        } catch (e) {
+          engine.showSpinner(false);
+          alert(`Stalker Portal Error: ${e.message}`);
+        }
+      };
+
+      window.loadXmltvFeed = async function() {
+        const url = document.getElementById('input-xmltv-url')?.value.trim();
+        if (!url) {
+          alert('Please enter an XMLTV Guide Feed URL.');
+          return;
+        }
+        engine.showSpinner(true, 'Downloading XMLTV EPG...');
+        try {
+          const mapped = await xmltvParser.loadExternalEPG(url);
+          engine.showSpinner(false);
+          closeM3uModal();
+          alert(`Successfully mapped ${mapped} broadcast guide entries from XMLTV feed!`);
+        } catch (e) {
+          engine.showSpinner(false);
+          alert(`XMLTV Guide Error: ${e.message}`);
+        }
+      };
 
       if (btnFetchM3u) {
         btnFetchM3u.addEventListener('click', () => {
