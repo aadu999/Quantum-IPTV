@@ -1022,6 +1022,72 @@
       broadcastTVState();
     }
 
+    let offlineCountdownTimer = null;
+
+    function showOfflineOverlay(channel) {
+      if (state.isRemoteClient) return;
+      const overlay = document.getElementById('offline-overlay');
+      const nameEl = document.getElementById('offline-channel-name');
+      const countdownEl = document.getElementById('offline-countdown');
+      if (!overlay) return;
+
+      if (nameEl && channel) nameEl.textContent = channel.name;
+      overlay.classList.remove('hidden');
+
+      if (offlineCountdownTimer) clearInterval(offlineCountdownTimer);
+      let secondsLeft = 5;
+      if (countdownEl) countdownEl.textContent = `${secondsLeft}s`;
+
+      offlineCountdownTimer = setInterval(() => {
+        secondsLeft--;
+        if (countdownEl) countdownEl.textContent = `${secondsLeft}s`;
+        if (secondsLeft <= 0) {
+          clearInterval(offlineCountdownTimer);
+          playNextWorkingChannel();
+        }
+      }, 1000);
+    }
+
+    function hideOfflineOverlay() {
+      if (offlineCountdownTimer) {
+        clearInterval(offlineCountdownTimer);
+        offlineCountdownTimer = null;
+      }
+      const overlay = document.getElementById('offline-overlay');
+      if (overlay) overlay.classList.add('hidden');
+    }
+
+    function playNextWorkingChannel() {
+      hideOfflineOverlay();
+      if (state.filteredChannels.length === 0) return;
+
+      let nextIndex = state.currentChannelIndex;
+      let searchedCount = 0;
+
+      // Locate next channel not flagged as offline
+      do {
+        nextIndex = (nextIndex + 1) % state.filteredChannels.length;
+        searchedCount++;
+        const ch = state.filteredChannels[nextIndex];
+        if (ch && !state.offlineChannels.has(ch.id)) {
+          playChannel(nextIndex);
+          return;
+        }
+      } while (searchedCount < state.filteredChannels.length);
+
+      // If all channels are flagged, step sequentially
+      playChannel((state.currentChannelIndex + 1) % state.filteredChannels.length);
+    }
+
+    function loadMoreTvChannels() {
+      if (state.tvLimit >= state.filteredChannels.length) return;
+      const viewEl = document.getElementById('view-channels');
+      const currentScroll = viewEl ? viewEl.scrollTop : 0;
+      state.tvLimit += 80;
+      renderChannelList();
+      if (viewEl) viewEl.scrollTop = currentScroll;
+    }
+
     let controlsIdleTimer = null;
     const CONTROLS_HIDE_DELAY = 2500;
 
@@ -1194,6 +1260,10 @@
       const category = categoryFilter ? categoryFilter.value : 'ALL';
 
       state.filteredChannels = state.channels.filter(ch => {
+        if (state.hideOfflineFeeds && state.offlineChannels && state.offlineChannels.has(ch.id)) {
+          return false;
+        }
+
         const matchesQuery = !query || 
           (ch.name && ch.name.toLowerCase().includes(query)) || 
           (ch.group && ch.group.toLowerCase().includes(query)) ||
@@ -1206,27 +1276,34 @@
         return matchesQuery && matchesRegion && matchesCategory;
       });
 
+      state.tvLimit = 80;
       renderChannelList();
     }
 
     function renderChannelList() {
       if (!viewChannels) return;
 
+      const counterEl = document.getElementById('tv-channel-counter');
+      if (counterEl) {
+        counterEl.textContent = `${state.filteredChannels.length.toLocaleString()} channels`;
+      }
+
       if (state.filteredChannels.length === 0) {
         viewChannels.innerHTML = `
           <div class="p-6 text-center text-xs text-slate-500">
             <i class="fa-solid fa-tv text-xl mb-2 text-slate-600 block"></i>
             No channels found matching query.<br>
-            <span class="text-[10px] text-slate-400">Try searching "Asianet" or clear filters.</span>
+            <span class="text-[10px] text-slate-400">Try clearing filters or search terms.</span>
           </div>`;
         return;
       }
 
-      const displayChannels = state.filteredChannels.slice(0, 100);
+      const displayChannels = state.filteredChannels.slice(0, state.tvLimit || 80);
 
-      viewChannels.innerHTML = displayChannels.map((ch, idx) => {
+      let html = displayChannels.map((ch, idx) => {
         const isActive = idx === state.currentChannelIndex;
         const isFav = state.favorites.includes(ch.id);
+        const isOffline = state.offlineChannels ? state.offlineChannels.has(ch.id) : false;
 
         return `
           <div onclick="playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${isActive ? 'bg-brand-950/60 border-l-4 border-brand-500 pl-2' : ''}">
@@ -1236,6 +1313,7 @@
                 <div class="text-xs font-semibold ${isActive ? 'text-brand-400' : 'text-slate-200'} truncate flex items-center gap-1.5">
                   <span>${ch.name}</span>
                   ${isActive ? '<span class="w-1.5 h-1.5 rounded-full bg-brand-400 animate-ping"></span>' : ''}
+                  ${isOffline ? '<span class="text-[9px] px-1 py-0.2 rounded bg-rose-950/80 text-rose-400 border border-rose-800/50 font-mono">Offline</span>' : ''}
                 </div>
                 <div class="text-[10px] text-slate-400 truncate flex items-center gap-1.5">
                   <span class="px-1 py-0.2 rounded bg-slate-800 text-[9px] text-slate-400 font-mono">${ch.country || 'TV'}</span>
@@ -1249,6 +1327,17 @@
           </div>
         `;
       }).join('');
+
+      if ((state.tvLimit || 80) < state.filteredChannels.length) {
+        html += `
+          <div class="p-3 text-center text-[11px] text-slate-500 bg-slate-950/30 flex items-center justify-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse"></span>
+            <span>Scroll for more (${displayChannels.length} of ${state.filteredChannels.length.toLocaleString()})</span>
+          </div>
+        `;
+      }
+
+      viewChannels.innerHTML = html;
     }
 
     function generateSyntheticEpg() {
@@ -1320,7 +1409,7 @@
           filterChannels();
 
           const countBadge = document.getElementById('badge-channels-count');
-          if (countBadge) countBadge.textContent = `${state.channels.length} Channels Active`;
+          if (countBadge) countBadge.textContent = `${state.channels.length.toLocaleString()} Channels Active`;
           
           if (!isBackground && !state.isRemoteClient) {
             playChannel(0);
@@ -1369,7 +1458,6 @@
             results.push(currentInfo);
             currentInfo = null;
           }
-          if (results.length >= 2500) break;
         }
       }
       return results;
@@ -1907,11 +1995,14 @@
           if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
         });
         video.addEventListener('playing', () => {
-          engine.showSpinner(false);
+          engine.onStreamPlaying();
           wakeControls();
         });
         video.addEventListener('waiting', () => {
           engine.showSpinner(true, "Buffering Stream...");
+        });
+        video.addEventListener('error', () => {
+          engine.onStreamFailed("Video playback error");
         });
       }
 
@@ -2001,6 +2092,38 @@
       if (searchInput) searchInput.addEventListener('input', filterChannels);
       if (regionFilter) regionFilter.addEventListener('change', filterChannels);
       if (categoryFilter) categoryFilter.addEventListener('change', filterChannels);
+
+      const filterActiveOnly = document.getElementById('filter-active-only');
+      if (filterActiveOnly) {
+        filterActiveOnly.addEventListener('change', (e) => {
+          state.hideOfflineFeeds = e.target.checked;
+          filterChannels();
+        });
+      }
+
+      // Infinite scroll listener for TV channel list
+      if (viewChannels) {
+        viewChannels.addEventListener('scroll', () => {
+          if (viewChannels.scrollTop + viewChannels.clientHeight >= viewChannels.scrollHeight - 160) {
+            loadMoreTvChannels();
+          }
+        });
+      }
+
+      const btnRetryOffline = document.getElementById('btn-retry-offline');
+      if (btnRetryOffline) {
+        btnRetryOffline.addEventListener('click', () => {
+          hideOfflineOverlay();
+          playChannel(state.currentChannelIndex);
+        });
+      }
+
+      const btnSkipOffline = document.getElementById('btn-skip-offline');
+      if (btnSkipOffline) {
+        btnSkipOffline.addEventListener('click', () => {
+          playNextWorkingChannel();
+        });
+      }
 
       const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
       const channelSidebar = document.getElementById('channel-sidebar');
