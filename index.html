@@ -981,6 +981,85 @@
       <div id="remote-epg-render" class="flex flex-col gap-2"></div>
     </div>
 
+    <!-- Provider & M3U Config Screen on Mobile Remote -->
+    <div id="remote-body-config" class="flex-1 overflow-y-auto p-3.5 hidden flex-col gap-3">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3 shadow-xl">
+        <div class="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-brand-600/30 text-brand-400 border border-brand-500/30 flex items-center justify-center text-xs">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+            </div>
+            <div>
+              <h2 class="text-xs font-bold text-white tracking-wide">REMOTE PROVIDER SETUP</h2>
+              <p class="text-[10px] text-slate-400">Configure IPTV feeds on your TV from your phone</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode Selector: Xtream API / Custom M3U / Stalker / XMLTV -->
+        <div class="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-xl text-[10px] font-semibold">
+          <button onclick="setRemoteConfigType('xtream')" id="rem-cfg-btn-xtream" class="py-1.5 rounded-lg bg-brand-600 text-white transition">Xtream</button>
+          <button onclick="setRemoteConfigType('m3u')" id="rem-cfg-btn-m3u" class="py-1.5 rounded-lg text-slate-400 hover:text-white transition">M3U URL</button>
+          <button onclick="setRemoteConfigType('stalker')" id="rem-cfg-btn-stalker" class="py-1.5 rounded-lg text-slate-400 hover:text-white transition">Stalker</button>
+          <button onclick="setRemoteConfigType('epg')" id="rem-cfg-btn-epg" class="py-1.5 rounded-lg text-slate-400 hover:text-white transition">EPG</button>
+        </div>
+
+        <!-- Form: Xtream API -->
+        <div id="rem-cfg-form-xtream" class="flex flex-col gap-2.5 text-left">
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Server Host URL</label>
+            <input id="rem-xtream-host" type="text" placeholder="http://provider.domain:8080" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Username</label>
+              <input id="rem-xtream-user" type="text" placeholder="Username" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+            </div>
+            <div>
+              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Password</label>
+              <input id="rem-xtream-pass" type="password" placeholder="Password" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+            </div>
+          </div>
+        </div>
+
+        <!-- Form: Custom M3U -->
+        <div id="rem-cfg-form-m3u" class="hidden flex-col gap-2.5 text-left">
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">M3U / M3U8 Playlist URL</label>
+            <textarea id="rem-m3u-url" rows="3" placeholder="https://example.com/playlist.m3u8&#10;(or paste raw M3U text)" class="w-full bg-slate-950 text-white text-xs p-3 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono text-[11px]"></textarea>
+          </div>
+        </div>
+
+        <!-- Form: Stalker Portal -->
+        <div id="rem-cfg-form-stalker" class="hidden flex-col gap-2.5 text-left">
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Stalker Portal URL</label>
+            <input id="rem-stalker-url" type="text" placeholder="http://stalker.portal.com/c/" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Device MAC Address</label>
+            <input id="rem-stalker-mac" type="text" placeholder="00:1A:79:XX:XX:XX" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+        </div>
+
+        <!-- Form: XMLTV EPG -->
+        <div id="rem-cfg-form-epg" class="hidden flex-col gap-2.5 text-left">
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">XMLTV EPG Guide URL</label>
+            <input id="rem-epg-url" type="text" placeholder="https://epg.provider.com/epg.xml" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button onclick="submitRemoteProviderConfig()" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-brand-600/30 flex items-center justify-center gap-2 active:scale-95 transition">
+          <i class="fa-solid fa-paper-plane text-xs"></i>
+          <span>Push & Sync to Smart TV</span>
+        </button>
+
+        <div id="rem-cfg-status-msg" class="text-[11px] text-center text-emerald-400 font-medium hidden"></div>
+      </div>
+    </div>
+
     <!-- Mobile Remote Bottom Tabs -->
     <nav class="h-16 bg-slate-900/95 border-t border-slate-800 flex items-center justify-around px-2 shrink-0">
       <button id="rem-nav-pad" class="flex-1 py-1 text-brand-400 flex flex-col items-center gap-1 text-[10px] font-semibold">
@@ -998,6 +1077,10 @@
       <button id="rem-nav-epg" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
         <i class="fa-solid fa-calendar-days text-base"></i>
         <span>Schedule</span>
+      </button>
+      <button id="rem-nav-config" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+        <i class="fa-solid fa-sliders text-base"></i>
+        <span>Providers</span>
       </button>
     </nav>
   </div>
@@ -3725,6 +3808,60 @@
             broadcastTVState();
           }
           break;
+        case 'CONFIGURE_PROVIDER':
+          if (msg.payload) {
+            handleRemoteProviderConfig(msg.payload);
+          }
+          break;
+      }
+    }
+
+    async function handleRemoteProviderConfig(payload) {
+      if (!payload || !payload.type) return;
+      console.log('Received remote provider configuration:', payload);
+      closeModals();
+
+      try {
+        if (payload.type === 'xtream') {
+          const hostInput = document.getElementById('xtream-host');
+          const userInput = document.getElementById('xtream-user');
+          const passInput = document.getElementById('xtream-pass');
+          if (hostInput) hostInput.value = payload.host || '';
+          if (userInput) userInput.value = payload.username || '';
+          if (passInput) passInput.value = payload.password || '';
+
+          if (typeof engine !== 'undefined') engine.showSpinner(true, 'Syncing Xtream Provider from Remote...');
+          await connectXtreamApi(payload.host, payload.username, payload.password);
+        } else if (payload.type === 'm3u') {
+          const m3uInput = document.getElementById('custom-m3u-url');
+          if (m3uInput) m3uInput.value = payload.url || '';
+
+          if (typeof engine !== 'undefined') engine.showSpinner(true, 'Loading M3U Playlist from Remote...');
+          if (payload.url.startsWith('http://') || payload.url.startsWith('https://')) {
+            await loadCustomM3uUrl(payload.url);
+          } else {
+            await parseAndLoadM3U(payload.url, 'Remote M3U');
+          }
+        } else if (payload.type === 'stalker') {
+          const stalkerUrlInput = document.getElementById('stalker-url');
+          const stalkerMacInput = document.getElementById('stalker-mac');
+          if (stalkerUrlInput) stalkerUrlInput.value = payload.url || '';
+          if (stalkerMacInput) stalkerMacInput.value = payload.mac || '';
+
+          if (typeof engine !== 'undefined') engine.showSpinner(true, 'Connecting Stalker Portal from Remote...');
+          await connectStalkerPortal(payload.url, payload.mac);
+        } else if (payload.type === 'epg') {
+          const epgInput = document.getElementById('xmltv-url');
+          if (epgInput) epgInput.value = payload.url || '';
+
+          if (typeof engine !== 'undefined') engine.showSpinner(true, 'Loading EPG Guide from Remote...');
+          await loadXmltvFeed(payload.url);
+        }
+
+        broadcastTVState();
+      } catch (err) {
+        console.error('Failed to configure provider from remote command:', err);
+        if (typeof engine !== 'undefined') engine.showSpinner(false);
       }
     }
 
@@ -4010,19 +4147,22 @@
         const navChannels = document.getElementById('rem-nav-channels');
         const navFavs = document.getElementById('rem-nav-favs');
         const navEpg = document.getElementById('rem-nav-epg');
+        const navConfig = document.getElementById('rem-nav-config');
 
         const bodyPad = document.getElementById('remote-body-pad');
         const bodyChannels = document.getElementById('remote-body-channels');
         const bodyFavs = document.getElementById('remote-body-favs');
         const bodyEpg = document.getElementById('remote-body-epg');
+        const bodyConfig = document.getElementById('remote-body-config');
 
         function switchRemoteTab(tab) {
           if (bodyPad) bodyPad.classList.toggle('hidden', tab !== 'pad');
           if (bodyChannels) bodyChannels.classList.toggle('hidden', tab !== 'channels');
           if (bodyFavs) bodyFavs.classList.toggle('hidden', tab !== 'favs');
           if (bodyEpg) bodyEpg.classList.toggle('hidden', tab !== 'epg');
+          if (bodyConfig) bodyConfig.classList.toggle('hidden', tab !== 'config');
 
-          [navPad, navChannels, navFavs, navEpg].forEach(b => {
+          [navPad, navChannels, navFavs, navEpg, navConfig].forEach(b => {
             if (b) {
               b.classList.remove('text-brand-400');
               b.classList.add('text-slate-400');
@@ -4042,12 +4182,16 @@
             navEpg.classList.add('text-brand-400');
             renderRemoteEpgList();
           }
+          if (tab === 'config' && navConfig) {
+            navConfig.classList.add('text-brand-400');
+          }
         }
 
         if (navPad) navPad.addEventListener('click', () => switchRemoteTab('pad'));
         if (navChannels) navChannels.addEventListener('click', () => switchRemoteTab('channels'));
         if (navFavs) navFavs.addEventListener('click', () => switchRemoteTab('favs'));
         if (navEpg) navEpg.addEventListener('click', () => switchRemoteTab('epg'));
+        if (navConfig) navConfig.addEventListener('click', () => switchRemoteTab('config'));
 
         const remSearch = document.getElementById('remote-search-input');
         let remSearchTimer = null;
@@ -4060,6 +4204,72 @@
             }, 150);
           });
         }
+      }
+    }
+
+    let currentRemoteConfigType = 'xtream';
+    function setRemoteConfigType(type) {
+      currentRemoteConfigType = type;
+      ['xtream', 'm3u', 'stalker', 'epg'].forEach(t => {
+        const btn = document.getElementById(`rem-cfg-btn-${t}`);
+        const form = document.getElementById(`rem-cfg-form-${t}`);
+        if (btn) {
+          btn.className = (t === type)
+            ? 'py-1.5 rounded-lg bg-brand-600 text-white transition'
+            : 'py-1.5 rounded-lg text-slate-400 hover:text-white transition';
+        }
+        if (form) {
+          form.className = (t === type) ? 'flex flex-col gap-2.5 text-left' : 'hidden';
+        }
+      });
+    }
+
+    function submitRemoteProviderConfig() {
+      let payload = { type: currentRemoteConfigType };
+      const statusEl = document.getElementById('rem-cfg-status-msg');
+
+      if (currentRemoteConfigType === 'xtream') {
+        const host = document.getElementById('rem-xtream-host')?.value.trim();
+        const user = document.getElementById('rem-xtream-user')?.value.trim();
+        const pass = document.getElementById('rem-xtream-pass')?.value.trim();
+        if (!host) {
+          alert('Please enter a valid Xtream Server Host URL');
+          return;
+        }
+        payload.host = host;
+        payload.username = user;
+        payload.password = pass;
+      } else if (currentRemoteConfigType === 'm3u') {
+        const url = document.getElementById('rem-m3u-url')?.value.trim();
+        if (!url) {
+          alert('Please enter a valid M3U URL or playlist content');
+          return;
+        }
+        payload.url = url;
+      } else if (currentRemoteConfigType === 'stalker') {
+        const url = document.getElementById('rem-stalker-url')?.value.trim();
+        const mac = document.getElementById('rem-stalker-mac')?.value.trim();
+        if (!url) {
+          alert('Please enter a Stalker Portal URL');
+          return;
+        }
+        payload.url = url;
+        payload.mac = mac;
+      } else if (currentRemoteConfigType === 'epg') {
+        const url = document.getElementById('rem-epg-url')?.value.trim();
+        if (!url) {
+          alert('Please enter an XMLTV EPG URL');
+          return;
+        }
+        payload.url = url;
+      }
+
+      sendRemoteCmd('CONFIGURE_PROVIDER', payload);
+
+      if (statusEl) {
+        statusEl.textContent = '✓ Configuration sent to TV! Syncing streams...';
+        statusEl.classList.remove('hidden');
+        setTimeout(() => statusEl.classList.add('hidden'), 4000);
       }
     }
 
