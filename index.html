@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Quantum IPTV & IoT Remote Player</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath fill='%23ffffff' d='M10 8l6 4-6 4V8z'/%3E%3C/svg%3E" type="image/svg+xml">
   
   <!-- Inter & JetBrains Mono Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -659,6 +660,46 @@
      * Built-in Channels featuring Asianet, National & Global High-Availability Streams
      */
     const DEFAULT_PRESET_CHANNELS = [
+      {
+        id: "jaya-tv-hd",
+        name: "Jaya TV (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",
+        group: "Entertainment",
+        country: "IN",
+        language: "Tamil",
+        url: "https://d35j504z0x1be1.cloudfront.net/out/v1/4b998a69d7bc4a89a05a8f4c2c5890c2/index.m3u8",
+        program: "Jaya Special Prime Entertainment & Tamil Serial"
+      },
+      {
+        id: "jaya-plus-news",
+        name: "Jaya Plus News (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",
+        group: "News",
+        country: "IN",
+        language: "Tamil",
+        url: "https://amg01443-amg01443c1-amgplt0016.playout.now3.amagi.tv/playlist/amg01443-amg01443c1-amgplt0016/playlist.m3u8",
+        program: "Tamilnadu Breaking News & Daily Bulletins"
+      },
+      {
+        id: "sun-news-tamil",
+        name: "Sun News (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Sun_News_logo.png/512px-Sun_News_logo.png",
+        group: "News",
+        country: "IN",
+        language: "Tamil",
+        url: "https://sunnews.akamaized.net/hls/live/2034034/sunnews/master.m3u8",
+        program: "Sun News Tamil Headlines & Debates"
+      },
+      {
+        id: "thanthi-tv",
+        name: "Thanthi TV (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Thanthi_TV_logo.svg/512px-Thanthi_TV_logo.svg.png",
+        group: "News",
+        country: "IN",
+        language: "Tamil",
+        url: "https://vidcdn.vidgyor.com/thanthi-origin/live/chunks.m3u8",
+        program: "Thanthi Headlines & Daily Express"
+      },
       {
         id: "asianet-news",
         name: "Asianet News (Malayalam)",
