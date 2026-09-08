@@ -1288,6 +1288,7 @@
       filteredChannels: [...DEFAULT_PRESET_CHANNELS],
       currentChannelIndex: 0,
       favorites: JSON.parse(localStorage.getItem('quantum_iptv_favs') || '[]'),
+      offlineChannels: new Set(),
       roomId: getOrGenerateRoomId(),
       isTheaterFullscreen: false,
       aspectIndex: 0,
@@ -2211,6 +2212,7 @@
         if (curCh) {
           circuitBreaker.recordFailure(curCh.url);
           playbackMachine.endAttempt('FAILED', reason);
+          if (!state.offlineChannels) state.offlineChannels = new Set();
           state.offlineChannels.add(curCh.id);
           showOfflineOverlay(curCh);
         }
