@@ -916,12 +916,7 @@
             if (data.fatal) {
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
-                  this.retryCount = (this.retryCount || 0) + 1;
-                  if (this.retryCount <= 2) {
-                    this.hls.startLoad();
-                  } else {
-                    this.fallbackToProxy();
-                  }
+                  this.fallbackToProxy();
                   break;
                 case Hls.ErrorTypes.MEDIA_ERROR:
                   this.hls.recoverMediaError();
@@ -967,7 +962,11 @@
         let targetUrl = url;
         // If app is served over HTTPS and stream is plain HTTP, auto-proxy via SSL wrapper to bypass Mixed Content blocking
         if (window.location.protocol === 'https:' && targetUrl.startsWith('http://')) {
-          targetUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+          if (/http:\/\/\d+\.\d+\.\d+\.\d+/.test(url)) {
+            targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          } else {
+            targetUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+          }
         }
 
         if (this.hls && Hls.isSupported()) {
@@ -1007,9 +1006,13 @@
         let proxiedUrl;
         
         if (this.proxyCount === 1) {
-          proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
+          if (/http:\/\/\d+\.\d+\.\d+\.\d+/.test(curCh.url)) {
+            proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
+          } else {
+            proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
+          }
         } else if (this.proxyCount === 2) {
-          proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
+          proxiedUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(curCh.url)}`;
         } else {
           this.onStreamFailed("Channel stream unplayable");
           return;
