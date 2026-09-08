@@ -400,9 +400,10 @@
           </select>
         </div>
 
-        <!-- Content Type Filter Pills: Live TV, VOD Movies, Series, Catchup -->
+        <!-- Content Type Filter Pills: All, Recommended, Live TV, VOD Movies, Series, Catchup -->
         <div class="flex items-center gap-1 text-[10px] overflow-x-auto pb-0.5 no-scrollbar">
           <button id="pill-type-all" onclick="filterContentType('ALL')" class="px-2 py-0.5 rounded-full bg-brand-600 text-white font-semibold whitespace-nowrap transition">All</button>
+          <button id="pill-type-recommended" onclick="filterContentType('recommended')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition flex items-center gap-1"><i class="fa-solid fa-wand-magic-sparkles text-amber-400 text-[9px]"></i> Recommended</button>
           <button id="pill-type-live" onclick="filterContentType('live')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">Live TV</button>
           <button id="pill-type-vod" onclick="filterContentType('vod')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">VOD Movies</button>
           <button id="pill-type-series" onclick="filterContentType('series')" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition">TV Series</button>
@@ -788,46 +789,6 @@
      */
     const DEFAULT_PRESET_CHANNELS = [
       {
-        id: "jaya-tv-hd",
-        name: "Jaya TV (Tamil)",
-        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",
-        group: "Entertainment",
-        country: "IN",
-        language: "Tamil",
-        url: "https://amg01443-amg01443c1-amgplt0016.playout.now3.amagi.tv/playlist/amg01443-amg01443c1-amgplt0016/playlist.m3u8",
-        program: "Jaya Special Prime Entertainment & Tamil Serial"
-      },
-      {
-        id: "jaya-plus-news",
-        name: "Jaya Plus News (Tamil)",
-        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",
-        group: "News",
-        country: "IN",
-        language: "Tamil",
-        url: "https://amg01443-amg01443c1-amgplt0016.playout.now3.amagi.tv/playlist/amg01443-amg01443c1-amgplt0016/playlist.m3u8",
-        program: "Tamilnadu Breaking News & Daily Bulletins"
-      },
-      {
-        id: "sun-news-tamil",
-        name: "Sun News (Tamil)",
-        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Sun_News_logo.png/512px-Sun_News_logo.png",
-        group: "News",
-        country: "IN",
-        language: "Tamil",
-        url: "https://sunnews.akamaized.net/hls/live/2034034/sunnews/master.m3u8",
-        program: "Sun News Tamil Headlines & Debates"
-      },
-      {
-        id: "thanthi-tv",
-        name: "Thanthi TV (Tamil)",
-        logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Thanthi_TV_logo.svg/512px-Thanthi_TV_logo.svg.png",
-        group: "News",
-        country: "IN",
-        language: "Tamil",
-        url: "https://vidcdn.vidgyor.com/thanthi-origin/live/chunks.m3u8",
-        program: "Thanthi Headlines & Daily Express"
-      },
-      {
         id: "asianet-news",
         name: "Asianet News (Malayalam)",
         logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
@@ -866,6 +827,46 @@
         language: "Malayalam",
         url: "https://vidcdn.vidgyor.com/asianet-origin/liveabr/asianet-origin/live2/chunks.m3u8",
         program: "Nonstop Live News Desk"
+      },
+      {
+        id: "jaya-tv-hd",
+        name: "Jaya TV (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",
+        group: "Entertainment",
+        country: "IN",
+        language: "Tamil",
+        url: "https://amg01443-amg01443c1-amgplt0016.playout.now3.amagi.tv/playlist/amg01443-amg01443c1-amgplt0016/playlist.m3u8",
+        program: "Jaya Special Prime Entertainment & Tamil Serial"
+      },
+      {
+        id: "jaya-plus-news",
+        name: "Jaya Plus News (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",
+        group: "News",
+        country: "IN",
+        language: "Tamil",
+        url: "https://amg01443-amg01443c1-amgplt0016.playout.now3.amagi.tv/playlist/amg01443-amg01443c1-amgplt0016/playlist.m3u8",
+        program: "Tamilnadu Breaking News & Daily Bulletins"
+      },
+      {
+        id: "sun-news-tamil",
+        name: "Sun News (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Sun_News_logo.png/512px-Sun_News_logo.png",
+        group: "News",
+        country: "IN",
+        language: "Tamil",
+        url: "https://sunnews.akamaized.net/hls/live/2034034/sunnews/master.m3u8",
+        program: "Sun News Tamil Headlines & Debates"
+      },
+      {
+        id: "thanthi-tv",
+        name: "Thanthi TV (Tamil)",
+        logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Thanthi_TV_logo.svg/512px-Thanthi_TV_logo.svg.png",
+        group: "News",
+        country: "IN",
+        language: "Tamil",
+        url: "https://vidcdn.vidgyor.com/thanthi-origin/live/chunks.m3u8",
+        program: "Thanthi Headlines & Daily Express"
       },
       {
         id: "ndtv-24x7",
@@ -1967,9 +1968,33 @@
       if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
       if (currentChEpg) currentChEpg.textContent = channel.program || "Live Stream";
 
+      recordUserInteraction(channel);
       engine.load(channel.url);
       renderChannelList();
       broadcastTVState();
+    }
+
+    /**
+     * Record channel play events to build intelligent user profile suggestions
+     */
+    function recordUserInteraction(channel) {
+      if (!channel) return;
+      try {
+        let history = JSON.parse(localStorage.getItem('quantum_user_interaction_history') || '{}');
+        const lang = channel.language || 'Unknown';
+        const group = channel.group || 'Live';
+        const id = channel.id;
+
+        history.languages = history.languages || {};
+        history.groups = history.groups || {};
+        history.channels = history.channels || {};
+
+        history.languages[lang] = (history.languages[lang] || 0) + 1;
+        history.groups[group] = (history.groups[group] || 0) + 1;
+        history.channels[id] = (history.channels[id] || 0) + 1;
+
+        localStorage.setItem('quantum_user_interaction_history', JSON.stringify(history));
+      } catch (e) {}
     }
 
     /**
@@ -2070,7 +2095,7 @@
 
     function filterContentType(type) {
       state.contentTypeFilter = type;
-      const pills = ['all', 'live', 'vod', 'series', 'catchup'];
+      const pills = ['all', 'recommended', 'live', 'vod', 'series', 'catchup'];
       pills.forEach(p => {
         const btn = document.getElementById(`pill-type-${p}`);
         if (btn) {
@@ -2097,7 +2122,7 @@
           return false;
         }
 
-        const matchesType = typeFilter === 'ALL' || 
+        const matchesType = typeFilter === 'ALL' || typeFilter === 'recommended' ||
           (typeFilter === 'live' && (!ch.type || ch.type === 'live')) ||
           (typeFilter === 'vod' && ch.type === 'vod') ||
           (typeFilter === 'series' && ch.type === 'series') ||
@@ -2116,6 +2141,37 @@
 
         return matchesType && matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
       });
+
+      if (typeFilter === 'recommended') {
+        let history = {};
+        try {
+          history = JSON.parse(localStorage.getItem('quantum_user_interaction_history') || '{}');
+        } catch (e) {}
+
+        const favSet = new Set(state.favorites || []);
+        const langFreq = history.languages || {};
+        const groupFreq = history.groups || {};
+        const playFreq = history.channels || {};
+
+        state.filteredChannels.sort((a, b) => {
+          let scoreA = 0;
+          let scoreB = 0;
+
+          if (favSet.has(a.id)) scoreA += 50;
+          if (favSet.has(b.id)) scoreB += 50;
+
+          scoreA += (playFreq[a.id] || 0) * 10;
+          scoreB += (playFreq[b.id] || 0) * 10;
+
+          scoreA += (langFreq[a.language] || 0) * 3;
+          scoreB += (langFreq[b.language] || 0) * 3;
+
+          scoreA += (groupFreq[a.group] || 0) * 2;
+          scoreB += (groupFreq[b.group] || 0) * 2;
+
+          return scoreB - scoreA;
+        });
+      }
 
       state.tvLimit = 80;
       renderChannelList();
