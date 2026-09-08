@@ -959,9 +959,11 @@
       <!-- Remote Category Filter Pills -->
       <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
         <button onclick="setRemoteCategory('ALL')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-brand-600 text-white font-medium whitespace-nowrap" data-cat="ALL">All</button>
+        <button onclick="setRemoteCategory('MOVIES')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="MOVIES">🎬 Movies</button>
+        <button onclick="setRemoteCategory('SERIES')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="SERIES">🍿 Series</button>
+        <button onclick="setRemoteCategory('LIVE')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="LIVE">📺 Live TV</button>
         <button onclick="setRemoteCategory('IN')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="IN">India (Asianet)</button>
         <button onclick="setRemoteCategory('News')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="News">News</button>
-        <button onclick="setRemoteCategory('Entertainment')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="Entertainment">Entertainment</button>
         <button onclick="setRemoteCategory('Sports')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="Sports">Sports</button>
       </div>
 
@@ -1866,7 +1868,7 @@
     }
 
     /**
-     * Helper to normalize Host, Username, and Password from inputs or full URLs
+     * Helper to normalize Host, Username, and Password from inputs or full get.php URLs
      */
     function parseXtreamInput(hostInput, userInput, passInput) {
       let host = (hostInput || '').trim();
@@ -1882,22 +1884,45 @@
         }
       }
 
-      if (host.includes('get.php') || host.includes('player_api.php') || host.includes('username=')) {
+      if (host.includes('get.php') || host.includes('player_api.php') || host.includes('username=') || host.includes('user=')) {
         try {
-          const u = new URL(host);
+          const u = new URL(host.startsWith('http') ? host : `http://${host}`);
           const params = new URLSearchParams(u.search);
-          if (!user && params.get('username')) user = params.get('username');
-          if (!pass && params.get('password')) pass = params.get('password');
+          if (params.get('username')) user = params.get('username');
+          if (!user && params.get('user')) user = params.get('user');
+          if (params.get('password')) pass = params.get('password');
+          if (!pass && params.get('pass')) pass = params.get('pass');
           host = u.origin;
         } catch (e) {
-          const userMatch = host.match(/username=([^&]+)/);
-          const passMatch = host.match(/password=([^&]+)/);
-          if (!user && userMatch) user = userMatch[1];
-          if (!pass && passMatch) pass = passMatch[1];
+          const userMatch = host.match(/(?:username|user)=([^&]+)/i);
+          const passMatch = host.match(/(?:password|pass)=([^&]+)/i);
+          if (userMatch) user = userMatch[1];
+          if (passMatch) pass = passMatch[1];
           host = host.split('/get.php')[0].split('/player_api.php')[0];
         }
       }
       return { host: host.replace(/\/+$/, ''), username: user, password: pass };
+    }
+
+    function attachXtreamAutoParse(hostId, userId, passId) {
+      const hostEl = document.getElementById(hostId);
+      const userEl = document.getElementById(userId);
+      const passEl = document.getElementById(passId);
+      if (!hostEl) return;
+
+      const triggerParse = () => {
+        const raw = hostEl.value.trim();
+        if (raw.includes('get.php') || raw.includes('player_api.php') || raw.includes('username=') || raw.includes('user=')) {
+          const parsed = parseXtreamInput(raw, userEl ? userEl.value : '', passEl ? passEl.value : '');
+          if (parsed.host) hostEl.value = parsed.host;
+          if (userEl && parsed.username) userEl.value = parsed.username;
+          if (passEl && parsed.password) passEl.value = parsed.password;
+        }
+      };
+
+      hostEl.addEventListener('input', triggerParse);
+      hostEl.addEventListener('paste', () => setTimeout(triggerParse, 50));
+      hostEl.addEventListener('blur', triggerParse);
     }
 
     /**
@@ -3751,6 +3776,14 @@
       switch (msg.action) {
         case 'REQUEST_SYNC':
           broadcastTVState();
+          // Auto-close QR code remote pairing modal when mobile device connects
+          const remoteModal = document.getElementById('modal-remote');
+          if (remoteModal && !remoteModal.classList.contains('hidden')) {
+            remoteModal.classList.add('hidden');
+            if (typeof engine !== 'undefined' && engine.showToast) {
+              engine.showToast('📱 Remote Client Connected!', 'success');
+            }
+          }
           break;
         case 'PLAY_PAUSE':
         case 'OK':
@@ -3976,9 +4009,20 @@
           (ch.group && ch.group.toLowerCase().includes(query)) ||
           (ch.program && ch.program.toLowerCase().includes(query));
 
-        const matchesCat = cat === 'ALL' ||
-          (cat === 'IN' && (ch.country === 'IN' || (ch.name && /asianet|india|malayalam|kannada|hindi|tamil/i.test(ch.name)))) ||
-          (ch.group && ch.group.toLowerCase().includes(cat.toLowerCase()));
+        let matchesCat = false;
+        if (cat === 'ALL') {
+          matchesCat = true;
+        } else if (cat === 'MOVIES') {
+          matchesCat = (ch.type === 'vod' || ch.isVod === true || (ch.group && /movie|vod|cinema|film/i.test(ch.group)) || (ch.url && (ch.url.includes('/movie/') || (/\.(mkv|mp4|avi)$/i.test(ch.url))) && ch.type !== 'series'));
+        } else if (cat === 'SERIES') {
+          matchesCat = (ch.type === 'series' || ch.seriesId || (ch.group && /series|shows|seasons/i.test(ch.group)) || (ch.url && ch.url.includes('/series/')));
+        } else if (cat === 'LIVE') {
+          matchesCat = (ch.type !== 'vod' && ch.type !== 'series' && !ch.isVod && (!ch.url || (!ch.url.includes('/movie/') && !ch.url.includes('/series/'))));
+        } else if (cat === 'IN') {
+          matchesCat = (ch.country === 'IN' || (ch.name && /asianet|india|malayalam|kannada|hindi|tamil/i.test(ch.name)));
+        } else {
+          matchesCat = (ch.group && ch.group.toLowerCase().includes(cat.toLowerCase()));
+        }
 
         return matchesSearch && matchesCat;
       });
@@ -3987,7 +4031,7 @@
         container.innerHTML = `
           <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
             <i class="fa-solid fa-tv text-2xl text-slate-600"></i>
-            <span>No channels found matching "${query}".</span>
+            <span>No streams found matching "${query}".</span>
             <span class="text-[10px] text-slate-600">Try checking your spelling or selecting 'All'.</span>
           </div>`;
         if (loadMoreBtn) loadMoreBtn.classList.add('hidden');
@@ -4004,13 +4048,20 @@
         const safeLogo = (ch.logo || '').replace(/'/g, "\\'");
         const safeProg = (ch.program || 'Live Broadcast').replace(/'/g, "\\'");
 
+        let badgeTag = ch.country || 'TV';
+        if (ch.type === 'vod' || ch.isVod || (ch.url && ch.url.includes('/movie/'))) {
+          badgeTag = '🎬 VOD Movie';
+        } else if (ch.type === 'series' || ch.seriesId || (ch.url && ch.url.includes('/series/'))) {
+          badgeTag = '🍿 TV Series';
+        }
+
         return `
           <div onclick="sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition">
             <div class="flex items-center gap-3 overflow-hidden">
               <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
               <div class="text-left overflow-hidden">
                 <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
-                <div class="text-[10px] text-slate-400">${ch.country || 'TV'} · ${ch.group || 'Live Stream'}</div>
+                <div class="text-[10px] text-slate-400">${badgeTag} · ${ch.group || 'Stream'}</div>
               </div>
             </div>
             <div class="flex items-center gap-2 shrink-0">
@@ -4274,6 +4325,10 @@
     }
 
     function setupEventListeners() {
+      // Auto-parse full get.php URLs pasted into Host inputs
+      attachXtreamAutoParse('input-xtream-host', 'input-xtream-user', 'input-xtream-pass');
+      attachXtreamAutoParse('rem-xtream-host', 'rem-xtream-user', 'rem-xtream-pass');
+
       // Robust prevention of double-tap and gesture zoom
       let lastTouchEnd = 0;
       document.addEventListener('touchend', (e) => {
