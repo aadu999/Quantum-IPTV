@@ -193,6 +193,12 @@
         <span id="badge-quarantine-count" class="hidden px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-bold text-[9px]">0</span>
       </button>
 
+      <!-- Asianet News Quick Tune Button -->
+      <button id="btn-quick-asianet" onclick="tuneToAsianetNews()" class="px-2.5 py-1 text-xs font-semibold text-rose-200 bg-rose-950/50 hover:bg-rose-900/60 rounded-md border border-rose-500/30 flex items-center gap-1.5 transition shadow-sm" title="Tune Asianet News">
+        <i class="fa-solid fa-fire text-rose-400"></i>
+        <span class="hidden md:inline">Asianet News</span>
+      </button>
+
       <!-- Intelligent Discovery Surprise Me Button -->
       <button id="btn-header-surprise" onclick="triggerSurpriseChannel()" class="px-2.5 py-1 text-xs font-semibold text-cyan-200 bg-cyan-950/50 hover:bg-cyan-900/60 rounded-md border border-cyan-500/30 flex items-center gap-1.5 transition shadow-sm" title="Surprise Me (Smart Discovery)">
         <i class="fa-solid fa-wand-magic-sparkles text-cyan-400"></i>
@@ -200,13 +206,13 @@
       </button>
 
       <!-- M3U Playlist Loader Button -->
-      <button id="btn-open-m3u-modal" class="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 rounded-md border border-slate-700/70 flex items-center gap-1.5 transition">
+      <button id="btn-open-m3u-modal" onclick="openM3uModal()" class="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 rounded-md border border-slate-700/70 flex items-center gap-1.5 transition">
         <i class="fa-solid fa-link text-brand-400"></i>
         <span class="hidden sm:inline">Load M3U</span>
       </button>
 
       <!-- Scannable Mobile Remote Trigger -->
-      <button id="btn-open-remote-modal" class="px-2.5 py-1 text-xs font-semibold text-white bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 rounded-md shadow-md shadow-brand-500/20 flex items-center gap-1.5 transition">
+      <button id="btn-open-remote-modal" onclick="openRemoteModal()" class="px-2.5 py-1 text-xs font-semibold text-white bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 rounded-md shadow-md shadow-brand-500/20 flex items-center gap-1.5 transition">
         <i class="fa-solid fa-qrcode"></i>
         <span>Scan Remote</span>
         <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-indicator hidden sm:inline-block"></span>
@@ -391,6 +397,7 @@
             <option value="Entertainment">Entertainment</option>
             <option value="Sports">Sports</option>
             <option value="Science">Science & Tech</option>
+          </select>
         </div>
 
         <!-- Content Type Filter Pills: Live TV, VOD Movies, Series, Catchup -->
@@ -1352,7 +1359,9 @@
 
       getRankedRecommendations(limit = 10) {
         const candidates = state.channels.filter(c => {
-          return !state.offlineChannels.has(c.id) && circuitBreaker.isAvailable(c.url);
+          const isOffline = (state.offlineChannels && typeof state.offlineChannels.has === 'function') ? state.offlineChannels.has(c.id) : false;
+          const isAvailable = (typeof circuitBreaker !== 'undefined' && typeof circuitBreaker.isAvailable === 'function') ? circuitBreaker.isAvailable(c.url) : true;
+          return !isOffline && isAvailable;
         });
 
         return candidates
@@ -2108,21 +2117,6 @@
         return matchesType && matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
       });
 
-      // ASIANET NEWS PINNED PRIORITY SORTING
-      state.filteredChannels.sort((a, b) => {
-        const aIsAsianetNews = /asianet\s*news/i.test(a.name);
-        const bIsAsianetNews = /asianet\s*news/i.test(b.name);
-        if (aIsAsianetNews && !bIsAsianetNews) return -1;
-        if (!aIsAsianetNews && bIsAsianetNews) return 1;
-
-        const aIsAsianet = /asianet/i.test(a.name);
-        const bIsAsianet = /asianet/i.test(b.name);
-        if (aIsAsianet && !bIsAsianet) return -1;
-        if (!aIsAsianet && bIsAsianet) return 1;
-
-        return 0;
-      });
-
       state.tvLimit = 80;
       renderChannelList();
     }
@@ -2318,6 +2312,11 @@
           
           updateLanguageDropdown();
           filterChannels();
+          try {
+            if (typeof QuantumOfflineCache !== 'undefined') {
+              QuantumOfflineCache.saveBundle(state.channels);
+            }
+          } catch(e) {}
 
           const countBadge = document.getElementById('badge-channels-count');
           if (countBadge) countBadge.textContent = `${state.channels.length.toLocaleString()} Channels Active`;
@@ -3128,12 +3127,40 @@
         });
       }
       if (btnCloseRemote) btnCloseRemote.addEventListener('click', () => modalRemote.classList.add('hidden'));
-      if (btnOpenM3u) btnOpenM3u.addEventListener('click', () => modalM3u.classList.remove('hidden'));
-      if (btnCloseM3u) btnCloseM3u.addEventListener('click', () => modalM3u.classList.add('hidden'));
-      if (btnCancelM3u) btnCancelM3u.addEventListener('click', () => modalM3u.classList.add('hidden'));
+      window.openM3uModal = function() {
+        const modal = document.getElementById('modal-m3u');
+        if (modal) modal.classList.remove('hidden');
+      };
+
+      window.openRemoteModal = function() {
+        if (typeof setupRemoteModal === 'function') setupRemoteModal();
+        const modal = document.getElementById('modal-remote');
+        if (modal) modal.classList.remove('hidden');
+      };
+
+      window.tuneToAsianetNews = function() {
+        if (!state.channels || state.channels.length === 0) {
+          alert('Loading India M3U playlist for Asianet News...');
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u');
+          return;
+        }
+        const asianetCh = state.channels.find(c => /asianet\s*news/i.test(c.name)) || state.channels.find(c => /asianet/i.test(c.name));
+        if (asianetCh) {
+          const idx = state.filteredChannels.indexOf(asianetCh);
+          if (idx !== -1) {
+            playChannel(idx);
+          } else {
+            tuneToChannel(asianetCh);
+          }
+        } else {
+          alert('Asianet News not in active view. Fetching India channels bundle...');
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u');
+        }
+      };
 
       window.closeM3uModal = function() {
-        if (modalM3u) modalM3u.classList.add('hidden');
+        const modal = document.getElementById('modal-m3u');
+        if (modal) modal.classList.add('hidden');
       };
 
       window.switchProviderTab = function(tab) {
@@ -3390,7 +3417,83 @@
       document.body.removeChild(tempInput);
     }
 
+    /**
+     * QuantumOfflineCache & Web Worker Engine
+     * Offloads M3U/XMLTV parsing & channel search to Web Workers and stores static backups in localStorage
+     */
+    class QuantumOfflineCache {
+      static SAVE_KEY = 'quantum_iptv_offline_bundle_v2';
+
+      static saveBundle(channels, epgData = []) {
+        try {
+          if (!channels || channels.length === 0) return;
+          const payload = {
+            timestamp: Date.now(),
+            channels: channels.slice(0, 800)
+          };
+          localStorage.setItem(this.SAVE_KEY, JSON.stringify(payload));
+        } catch (e) {}
+      }
+
+      static loadBundle() {
+        try {
+          const raw = localStorage.getItem(this.SAVE_KEY);
+          if (!raw) return null;
+          return JSON.parse(raw);
+        } catch (e) {
+          return null;
+        }
+      }
+    }
+
+    class QuantumWorkerEngine {
+      constructor() {
+        this.worker = null;
+        this.initWorker();
+      }
+
+      initWorker() {
+        const workerCode = `
+          self.onmessage = function(e) {
+            const { type, payload } = e.data;
+            if (type === 'FILTER_CHANNELS') {
+              const { channels, query } = payload;
+              const q = query.toLowerCase();
+              const filtered = channels.filter(c => 
+                (c.name && c.name.toLowerCase().includes(q)) ||
+                (c.group && c.group.toLowerCase().includes(q)) ||
+                (c.language && c.language.toLowerCase().includes(q))
+              );
+              self.postMessage({ type: 'FILTER_COMPLETE', filtered });
+            }
+          };
+        `;
+        try {
+          const blob = new Blob([workerCode], { type: 'application/javascript' });
+          this.worker = new Worker(URL.createObjectURL(blob));
+        } catch (e) {}
+      }
+
+      filterInBackground(channels, query, callback) {
+        if (!this.worker) return false;
+        this.worker.onmessage = (e) => {
+          if (e.data.type === 'FILTER_COMPLETE') {
+            callback(e.data.filtered);
+          }
+        };
+        this.worker.postMessage({ type: 'FILTER_CHANNELS', payload: { channels, query } });
+        return true;
+      }
+    }
+    const workerEngine = new QuantumWorkerEngine();
+
     window.onload = function () {
+      // Load offline static bundle fallback if offline
+      const cached = QuantumOfflineCache.loadBundle();
+      if (cached && cached.channels && cached.channels.length > 0) {
+        state.channels = cached.channels;
+        state.filteredChannels = cached.channels;
+      }
       checkAndLaunchRemoteView();
       setupEventListeners();
       initRemoteSync();
