@@ -1457,8 +1457,8 @@
     class QuantumCircuitBreaker {
       constructor() {
         this.hosts = new Map();
-        this.maxFailures = 3;
-        this.cooldownMs = 30000;
+        this.maxFailures = 8;
+        this.cooldownMs = 10000;
       }
 
       getHost(url) {
@@ -2222,8 +2222,6 @@
         const curCh = state.filteredChannels[state.currentChannelIndex];
         if (!curCh) return;
         
-        circuitBreaker.recordFailure(curCh.url);
-
         // Multi-Source In-Channel Failover: try backup stream source first!
         if (curCh.sources && curCh.sources.length > 1 && (curCh.activeSourceIndex || 0) < curCh.sources.length - 1) {
           curCh.activeSourceIndex = (curCh.activeSourceIndex || 0) + 1;
@@ -2236,6 +2234,8 @@
           return;
         }
 
+        const isDirectMedia = /\.(mp4|mkv|avi|mov|mp3|aac|flv)(\?.*)?$/i.test(curCh.url) || curCh.url.includes('/movie/') || curCh.url.includes('/series/');
+
         playbackMachine.transition('RECOVERING', { proxyAttempt: (this.proxyCount || 0) + 1 });
         
         this.proxyCount = (this.proxyCount || 0) + 1;
@@ -2243,23 +2243,25 @@
         
         if (this.proxyCount === 1) {
           proxiedUrl = `/api/proxy?url=${encodeURIComponent(curCh.url)}`;
-        } else if (this.proxyCount === 2) {
+        } else if (!isDirectMedia && this.proxyCount === 2) {
           proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
-        } else if (this.proxyCount === 3) {
+        } else if (!isDirectMedia && this.proxyCount === 3) {
           proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
-        } else if (this.proxyCount === 4) {
+        } else if (!isDirectMedia && this.proxyCount === 4) {
           proxiedUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(curCh.url)}`;
         } else {
+          circuitBreaker.recordFailure(curCh.url);
           this.onStreamFailed("Channel stream unplayable");
           return;
         }
 
-        if (this.hls) {
+        if (!isDirectMedia && this.hls) {
           this.hls.loadSource(proxiedUrl);
           this.hls.startLoad();
         } else if (this.video) {
           this.video.src = proxiedUrl;
           this.video.play().catch(() => {
+            circuitBreaker.recordFailure(curCh.url);
             this.onStreamFailed("Channel stream unplayable");
           });
         }
