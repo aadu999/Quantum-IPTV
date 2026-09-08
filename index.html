@@ -1608,7 +1608,8 @@
 
       fuseChannel(channelObj, sourceName = 'Default Playlist') {
         const normTitle = deduplicator.normalizeTitle(channelObj.name);
-        const key = channelObj.tvgId ? channelObj.tvgId.toLowerCase() : (normTitle || channelObj.url);
+        const typePrefix = channelObj.type || 'live';
+        const key = `${typePrefix}:${channelObj.tvgId ? channelObj.tvgId.toLowerCase() : (normTitle || channelObj.url)}`;
 
         const streamSource = {
           url: channelObj.url,
@@ -3391,10 +3392,17 @@
             const lowerUrl = line.toLowerCase();
             const lowerGrp = (currentInfo.group || '').toLowerCase();
             let type = 'live';
-            if (lowerUrl.includes('/series/') || lowerGrp.includes('series') || lowerGrp.includes('season')) {
+
+            const isLiveStreamExt = lowerUrl.endsWith('.m3u8') || lowerUrl.endsWith('.ts') || lowerUrl.includes('/live/') || lowerUrl.includes('get.php');
+
+            if (lowerUrl.includes('/series/')) {
               type = 'series';
-            } else if (lowerUrl.includes('/movie/') || lowerGrp.includes('vod') || lowerGrp.includes('movie') || /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(lowerUrl)) {
+            } else if (lowerUrl.includes('/movie/') || (lowerGrp.startsWith('vod') && !isLiveStreamExt) || (/\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(lowerUrl) && !isLiveStreamExt)) {
               type = 'vod';
+            } else if ((lowerGrp.startsWith('series') || lowerGrp.includes('seasons')) && !isLiveStreamExt) {
+              type = 'series';
+            } else {
+              type = 'live';
             }
             currentInfo.type = type;
 
