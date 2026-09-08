@@ -586,17 +586,17 @@
       <!-- Tab Content: Xtream API -->
       <div id="provider-section-xtream" class="flex flex-col gap-3 text-xs hidden">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Server Host URL</label>
-          <input id="input-xtream-host" type="text" placeholder="http://example.com:8080" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Server Host URL (or paste get.php link)</label>
+          <input id="input-xtream-host" type="text" value="http://ns106911.ip-51-81-106.us:25461" placeholder="http://ns106911.ip-51-81-106.us:25461" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
         </div>
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-[11px] font-semibold text-slate-300 mb-1">Username</label>
-            <input id="input-xtream-user" type="text" placeholder="user123" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+            <input id="input-xtream-user" type="text" value="000018" placeholder="000018" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
           </div>
           <div>
             <label class="block text-[11px] font-semibold text-slate-300 mb-1">Password</label>
-            <input id="input-xtream-pass" type="password" placeholder="••••••••" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+            <input id="input-xtream-pass" type="password" value="11111" placeholder="11111" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
           </div>
         </div>
         <div class="mt-2 flex items-center justify-end gap-2">
@@ -1009,17 +1009,17 @@
         <!-- Form: Xtream API -->
         <div id="rem-cfg-form-xtream" class="flex flex-col gap-2.5 text-left">
           <div>
-            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Server Host URL</label>
-            <input id="rem-xtream-host" type="text" placeholder="http://provider.domain:8080" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Server Host URL (or paste get.php link)</label>
+            <input id="rem-xtream-host" type="text" value="http://ns106911.ip-51-81-106.us:25461" placeholder="http://ns106911.ip-51-81-106.us:25461" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Username</label>
-              <input id="rem-xtream-user" type="text" placeholder="Username" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+              <input id="rem-xtream-user" type="text" value="000018" placeholder="000018" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
             </div>
             <div>
               <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Password</label>
-              <input id="rem-xtream-pass" type="password" placeholder="Password" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
+              <input id="rem-xtream-pass" type="password" value="11111" placeholder="11111" class="w-full bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono">
             </div>
           </div>
         </div>
@@ -1084,6 +1084,78 @@
         <i class="fa-solid fa-sliders text-base"></i>
         <span>Providers</span>
       </button>
+    <!-- Mobile Remote VOD Movie Detail Modal -->
+    <div id="rem-modal-movie" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col justify-end p-0 transition-all">
+      <div class="bg-slate-900 border-t border-slate-800 rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto flex flex-col gap-4 text-left">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-brand-950 text-brand-300 text-[10px] font-bold border border-brand-800/50">🎬 VOD MOVIE</span>
+            <span id="rem-movie-year" class="text-xs text-slate-400">2024</span>
+          </div>
+          <button onclick="closeRemoteMovieExplorer()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        
+        <div class="flex gap-4 items-start">
+          <img id="rem-movie-poster" src="" class="w-24 h-36 rounded-xl object-cover bg-slate-800 border border-slate-700 shadow-md shrink-0">
+          <div class="flex flex-col gap-1.5 overflow-hidden">
+            <h3 id="rem-movie-title" class="text-base font-bold text-white leading-tight truncate">Movie Title</h3>
+            <div class="text-xs text-amber-400 font-semibold flex items-center gap-1">
+              <i class="fa-solid fa-star text-xs"></i> <span id="rem-movie-rating">8.5 / 10</span>
+            </div>
+            <div id="rem-movie-genre" class="text-[11px] text-slate-400 truncate">VOD Movie</div>
+            <div id="rem-movie-director" class="text-[11px] text-slate-500 truncate"><i class="fa-solid fa-video mr-1"></i>Official Production</div>
+          </div>
+        </div>
+
+        <p id="rem-movie-plot" class="text-xs text-slate-300 leading-relaxed max-h-24 overflow-y-auto pr-1">High definition video stream. Tap below to start playing on TV.</p>
+
+        <button id="rem-btn-play-movie" class="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-brand-600/30 flex items-center justify-center gap-2 transition">
+          <i class="fa-solid fa-play"></i> Play Movie on Smart TV
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Remote TV Series & Seasons Detail Modal -->
+    <div id="rem-modal-series" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col justify-end p-0 transition-all">
+      <div class="bg-slate-900 border-t border-slate-800 rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto flex flex-col gap-4 text-left">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 text-[10px] font-bold border border-amber-800/50">🍿 TV SERIES</span>
+            <span id="rem-series-year" class="text-xs text-slate-400">2024</span>
+          </div>
+          <button onclick="closeRemoteSeriesExplorer()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div class="flex gap-4 items-start">
+          <img id="rem-series-poster" src="" class="w-24 h-36 rounded-xl object-cover bg-slate-800 border border-slate-700 shadow-md shrink-0">
+          <div class="flex flex-col gap-1.5 overflow-hidden">
+            <h3 id="rem-series-title" class="text-base font-bold text-white leading-tight truncate">Series Title</h3>
+            <div class="text-xs text-amber-400 font-semibold flex items-center gap-1">
+              <i class="fa-solid fa-star text-xs"></i> <span id="rem-series-rating">8.9 / 10</span>
+            </div>
+            <div id="rem-series-genre" class="text-[11px] text-slate-400 truncate">TV Series</div>
+            <div id="rem-series-cast" class="text-[11px] text-slate-500 truncate">Starring ensemble cast</div>
+          </div>
+        </div>
+
+        <p id="rem-series-plot" class="text-xs text-slate-300 leading-relaxed max-h-20 overflow-y-auto pr-1">Series description...</p>
+
+        <!-- Season selector tabs -->
+        <div id="rem-series-season-tabs" class="flex gap-2 overflow-x-auto py-1 scrollbar-none">
+          <!-- Season pills rendered dynamically -->
+        </div>
+
+        <!-- Episode list -->
+        <div id="rem-series-episode-list" class="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+          <!-- Episode cards rendered dynamically -->
+        </div>
+      </div>
+    </div>
+
     </nav>
   </div>
 
@@ -1884,9 +1956,13 @@
         }
       }
 
+      if (host && !host.startsWith('http://') && !host.startsWith('https://')) {
+        host = 'http://' + host;
+      }
+
       if (host.includes('get.php') || host.includes('player_api.php') || host.includes('username=') || host.includes('user=')) {
         try {
-          const u = new URL(host.startsWith('http') ? host : `http://${host}`);
+          const u = new URL(host);
           const params = new URLSearchParams(u.search);
           if (params.get('username')) user = params.get('username');
           if (!user && params.get('user')) user = params.get('user');
@@ -1901,7 +1977,30 @@
           host = host.split('/get.php')[0].split('/player_api.php')[0];
         }
       }
-      return { host: host.replace(/\/+$/, ''), username: user, password: pass };
+      return { host: (host || 'http://ns106911.ip-51-81-106.us:25461').replace(/\/+$/, ''), username: user || '000018', password: pass || '11111' };
+    }
+
+    function getXtreamCredentials() {
+      let host = state.lastXtreamHost || (document.getElementById('rem-xtream-host')?.value || document.getElementById('input-xtream-host')?.value || '').trim();
+      let user = state.lastXtreamUser || (document.getElementById('rem-xtream-user')?.value || document.getElementById('input-xtream-user')?.value || '').trim();
+      let pass = state.lastXtreamPass || (document.getElementById('rem-xtream-pass')?.value || document.getElementById('input-xtream-pass')?.value || '').trim();
+
+      if ((!host || !user || !pass) && state.channels && state.channels.length > 0) {
+        const sampleCh = state.channels.find(c => c.url && (c.url.includes('/series/') || c.url.includes('/movie/') || c.url.includes('/live/')));
+        if (sampleCh && sampleCh.url) {
+          try {
+            const u = new URL(sampleCh.url);
+            const parts = u.pathname.split('/');
+            if (parts.length >= 4) {
+              if (!user) user = parts[2];
+              if (!pass) pass = parts[3];
+              if (!host) host = u.origin;
+            }
+          } catch(e) {}
+        }
+      }
+
+      return parseXtreamInput(host, user, pass);
     }
 
     function attachXtreamAutoParse(hostId, userId, passId) {
@@ -2385,6 +2484,24 @@
           videoSpinner.classList.add('opacity-0');
           setTimeout(() => videoSpinner.classList.add('hidden'), 250);
         }
+      }
+
+      showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `fixed top-5 right-5 z-50 px-4 py-2.5 rounded-xl shadow-xl text-xs font-bold flex items-center gap-2 border backdrop-blur-md transition-all duration-300 transform translate-y-[-10px] opacity-0 ${
+          type === 'success' ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-200' :
+          type === 'error' ? 'bg-rose-950/90 border-rose-500/50 text-rose-200' :
+          'bg-slate-900/90 border-slate-700/50 text-white'
+        }`;
+        toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-circle-check text-emerald-400' : type === 'error' ? 'fa-circle-exclamation text-rose-400' : 'fa-circle-info text-brand-400'}"></i> <span>${message}</span>`;
+        document.body.appendChild(toast);
+        requestAnimationFrame(() => {
+          toast.classList.remove('translate-y-[-10px]', 'opacity-0');
+        });
+        setTimeout(() => {
+          toast.classList.add('translate-y-[-10px]', 'opacity-0');
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
       }
 
       startWatchdog() {
@@ -3854,19 +3971,30 @@
       console.log('Received remote provider configuration:', payload);
       closeModals();
 
+      // Always close remote QR modal
+      const remoteModal = document.getElementById('modal-remote');
+      if (remoteModal) remoteModal.classList.add('hidden');
+
       try {
         if (payload.type === 'xtream') {
-          const hostInput = document.getElementById('xtream-host');
-          const userInput = document.getElementById('xtream-user');
-          const passInput = document.getElementById('xtream-pass');
-          if (hostInput) hostInput.value = payload.host || '';
-          if (userInput) userInput.value = payload.username || '';
-          if (passInput) passInput.value = payload.password || '';
+          const parsed = parseXtreamInput(payload.host, payload.username, payload.password);
+          const cleanHost = parsed.host;
+          const cleanUser = parsed.username;
+          const cleanPass = parsed.password;
+
+          const hostInput = document.getElementById('input-xtream-host');
+          const userInput = document.getElementById('input-xtream-user');
+          const passInput = document.getElementById('input-xtream-pass');
+          if (hostInput) hostInput.value = cleanHost || '';
+          if (userInput) userInput.value = cleanUser || '';
+          if (passInput) passInput.value = cleanPass || '';
 
           if (typeof engine !== 'undefined') engine.showSpinner(true, 'Syncing Xtream Provider from Remote...');
-          await connectXtreamApi(payload.host, payload.username, payload.password);
+          if (typeof window.connectXtreamApi === 'function') {
+            await window.connectXtreamApi(cleanHost, cleanUser, cleanPass);
+          }
         } else if (payload.type === 'm3u') {
-          const m3uInput = document.getElementById('custom-m3u-url');
+          const m3uInput = document.getElementById('input-m3u-url');
           if (m3uInput) m3uInput.value = payload.url || '';
 
           if (typeof engine !== 'undefined') engine.showSpinner(true, 'Loading M3U Playlist from Remote...');
@@ -3876,15 +4004,15 @@
             await parseAndLoadM3U(payload.url, 'Remote M3U');
           }
         } else if (payload.type === 'stalker') {
-          const stalkerUrlInput = document.getElementById('stalker-url');
-          const stalkerMacInput = document.getElementById('stalker-mac');
+          const stalkerUrlInput = document.getElementById('input-stalker-url');
+          const stalkerMacInput = document.getElementById('input-stalker-mac');
           if (stalkerUrlInput) stalkerUrlInput.value = payload.url || '';
           if (stalkerMacInput) stalkerMacInput.value = payload.mac || '';
 
           if (typeof engine !== 'undefined') engine.showSpinner(true, 'Connecting Stalker Portal from Remote...');
           await connectStalkerPortal(payload.url, payload.mac);
         } else if (payload.type === 'epg') {
-          const epgInput = document.getElementById('xmltv-url');
+          const epgInput = document.getElementById('input-xmltv-url');
           if (epgInput) epgInput.value = payload.url || '';
 
           if (typeof engine !== 'undefined') engine.showSpinner(true, 'Loading EPG Guide from Remote...');
@@ -4049,14 +4177,21 @@
         const safeProg = (ch.program || 'Live Broadcast').replace(/'/g, "\\'");
 
         let badgeTag = ch.country || 'TV';
+        let clickHandler = `sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })`;
+        let iconClass = 'fa-play';
+
         if (ch.type === 'vod' || ch.isVod || (ch.url && ch.url.includes('/movie/'))) {
           badgeTag = '🎬 VOD Movie';
+          clickHandler = `openRemoteMovieExplorerById('${ch.id}')`;
+          iconClass = 'fa-film';
         } else if (ch.type === 'series' || ch.seriesId || (ch.url && ch.url.includes('/series/'))) {
           badgeTag = '🍿 TV Series';
+          clickHandler = `openRemoteSeriesExplorerById('${ch.id}')`;
+          iconClass = 'fa-tv';
         }
 
         return `
-          <div onclick="sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition">
+          <div onclick="${clickHandler}" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition cursor-pointer">
             <div class="flex items-center gap-3 overflow-hidden">
               <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
               <div class="text-left overflow-hidden">
@@ -4069,7 +4204,7 @@
                 <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
               </button>
               <div class="w-7 h-7 rounded-lg bg-brand-600/20 text-brand-400 flex items-center justify-center">
-                <i class="fa-solid fa-play text-[10px]"></i>
+                <i class="fa-solid ${iconClass} text-[10px]"></i>
               </div>
             </div>
           </div>
@@ -4079,6 +4214,183 @@
       if (loadMoreBtn) {
         loadMoreBtn.classList.toggle('hidden', list.length <= sliceLimit);
       }
+    }
+
+    function openRemoteMovieExplorerById(chId) {
+      const ch = state.channels.find(c => c.id === chId);
+      if (!ch) return;
+      const modal = document.getElementById('rem-modal-movie');
+      if (!modal) return;
+
+      const title = document.getElementById('rem-movie-title');
+      const poster = document.getElementById('rem-movie-poster');
+      const rating = document.getElementById('rem-movie-rating');
+      const genre = document.getElementById('rem-movie-genre');
+      const year = document.getElementById('rem-movie-year');
+      const director = document.getElementById('rem-movie-director');
+      const plot = document.getElementById('rem-movie-plot');
+      const btnPlay = document.getElementById('rem-btn-play-movie');
+
+      if (title) title.textContent = ch.name;
+      if (poster) poster.src = ch.cover || ch.logo || FALLBACK_LOGO;
+      if (rating) rating.textContent = ch.rating ? `${ch.rating} / 10` : '8.5 / 10';
+      if (genre) genre.textContent = ch.genre || ch.group || 'VOD Movie';
+      if (year) year.textContent = ch.releaseDate || '2024';
+      if (director) director.textContent = ch.director || 'Official Production';
+      if (plot) plot.textContent = ch.plot || `High definition movie stream: ${ch.name}. Tap below to play on TV.`;
+
+      if (btnPlay) {
+        btnPlay.onclick = () => {
+          closeRemoteMovieExplorer();
+          sendRemoteCmd('TUNE_CHANNEL', { id: ch.id, url: ch.url, name: ch.name, logo: ch.logo, program: ch.group || 'VOD Movie', type: 'vod' });
+        };
+      }
+
+      modal.classList.remove('hidden');
+
+      const vodId = ch.vodId || (ch.id && ch.id.startsWith('xt_vod_') ? ch.id.replace('xt_vod_', '') : null);
+      if (vodId && xtreamConnector) {
+        xtreamConnector.fetchVodInfo(vodId).then(infoData => {
+          if (infoData && infoData.info) {
+            const info = infoData.info;
+            if (info.movie_image || info.cover_big) poster.src = info.movie_image || info.cover_big;
+            if (info.rating) rating.textContent = `${info.rating} / 10`;
+            if (info.genre) genre.textContent = info.genre;
+            if (info.releasedate || info.year) year.textContent = info.releasedate || info.year;
+            if (info.director) director.textContent = info.director;
+            if (info.description || info.plot) plot.textContent = info.description || info.plot;
+          }
+        }).catch(() => {});
+      }
+    }
+
+    function closeRemoteMovieExplorer() {
+      const modal = document.getElementById('rem-modal-movie');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    let remoteCurrentSeriesCache = null;
+
+    async function openRemoteSeriesExplorerById(chId) {
+      const ch = state.channels.find(c => c.id === chId);
+      if (!ch) return;
+      const modal = document.getElementById('rem-modal-series');
+      if (!modal) return;
+
+      const title = document.getElementById('rem-series-title');
+      const poster = document.getElementById('rem-series-poster');
+      const rating = document.getElementById('rem-series-rating');
+      const genre = document.getElementById('rem-series-genre');
+      const year = document.getElementById('rem-series-year');
+      const cast = document.getElementById('rem-series-cast');
+      const plot = document.getElementById('rem-series-plot');
+      const tabs = document.getElementById('rem-series-season-tabs');
+      const list = document.getElementById('rem-series-episode-list');
+
+      if (title) title.textContent = ch.name;
+      if (poster) poster.src = ch.cover || ch.logo || FALLBACK_LOGO;
+      if (rating) rating.textContent = ch.rating ? `${ch.rating} / 10` : '8.9 / 10';
+      if (genre) genre.textContent = ch.genre || ch.group || 'TV Series';
+      if (year) year.textContent = ch.releaseDate || '2024';
+      if (cast) cast.textContent = ch.cast || 'Starring ensemble cast';
+      if (plot) plot.textContent = ch.plot || `Full seasons and episodes of ${ch.name}. Select a season and episode to play on TV.`;
+
+      if (tabs) tabs.innerHTML = `<div class="text-xs text-slate-400 p-2"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Loading seasons...</div>`;
+      if (list) list.innerHTML = '';
+
+      modal.classList.remove('hidden');
+
+      let seriesId = ch.seriesId;
+      if (!seriesId && ch.url && ch.url.includes('/series/')) {
+        const parts = ch.url.split('/');
+        seriesId = parts[parts.length - 1]?.split('.')[0];
+      }
+
+      if (seriesId && xtreamConnector) {
+        const info = await xtreamConnector.fetchSeriesInfo(seriesId);
+        if (info && info.episodes && Object.keys(info.episodes).length > 0) {
+          remoteCurrentSeriesCache = { info, channel: ch };
+          renderRemoteSeriesSeasonsAndEpisodes(info, ch);
+          return;
+        }
+      }
+
+      if (tabs) tabs.innerHTML = `<button class="px-3 py-1 rounded-xl bg-brand-600 text-white font-bold text-xs">Season 1</button>`;
+      if (list) {
+        list.innerHTML = `
+          <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+            <span class="text-xs text-white font-semibold">${ch.name} - Direct Stream</span>
+            <button onclick="closeRemoteSeriesExplorer(); sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${ch.url.replace(/'/g, "\\'")}', name: '${ch.name.replace(/'/g, "\\'")}', logo: '${(ch.logo || '').replace(/'/g, "\\'")}', program: '${(ch.group || 'TV Series').replace(/'/g, "\\'")}', type: 'series' })" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs flex items-center gap-1.5">
+              <i class="fa-solid fa-play text-[10px]"></i> Play on TV
+            </button>
+          </div>
+        `;
+      }
+    }
+
+    function renderRemoteSeriesSeasonsAndEpisodes(info, ch) {
+      if (!info || !info.episodes) return;
+      const episodesObj = info.episodes;
+      const seasonNums = Object.keys(episodesObj).sort((a, b) => Number(a) - Number(b));
+
+      let seasonsHtml = seasonNums.map((sNum, idx) => `
+        <button onclick="selectRemoteSeriesSeason('${sNum}')" id="rem-season-btn-${sNum}" class="rem-season-btn px-3 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 ${idx === 0 ? 'bg-brand-600 border-brand-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}">
+          Season ${sNum}
+        </button>
+      `).join('');
+
+      const tabs = document.getElementById('rem-series-season-tabs');
+      if (tabs) tabs.innerHTML = seasonsHtml;
+
+      if (seasonNums.length > 0) {
+        selectRemoteSeriesSeason(seasonNums[0]);
+      }
+    }
+
+    function selectRemoteSeriesSeason(seasonNum) {
+      if (!remoteCurrentSeriesCache || !remoteCurrentSeriesCache.info) return;
+      document.querySelectorAll('.rem-season-btn').forEach(btn => {
+        btn.className = 'rem-season-btn px-3 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 bg-slate-800 border-slate-700 text-slate-400';
+      });
+
+      const activeBtn = document.getElementById(`rem-season-btn-${seasonNum}`);
+      if (activeBtn) {
+        activeBtn.className = 'rem-season-btn px-3 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 bg-brand-600 border-brand-500 text-white';
+      }
+
+      const episodes = remoteCurrentSeriesCache.info.episodes[seasonNum] || [];
+      const ch = remoteCurrentSeriesCache.channel;
+      const creds = getXtreamCredentials();
+
+      const epListHtml = episodes.map(ep => {
+        const ext = ep.container_extension || 'mp4';
+        const epUrl = `${creds.host}/series/${creds.user}/${creds.pass}/${ep.id}.${ext}`;
+        const title = ep.title || `Episode ${ep.episode_num || ''}`;
+        const epCode = `S${String(seasonNum).padStart(2, '0')}E${String(ep.episode_num || 1).padStart(2, '0')}`;
+        const safeTitle = (ch.name + ' - ' + epCode + ' ' + title).replace(/'/g, "\\'");
+        const safeEpUrl = epUrl.replace(/'/g, "\\'");
+        const safeLogo = (ch.logo || '').replace(/'/g, "\\'");
+
+        return `
+          <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between gap-2 text-left">
+            <div class="overflow-hidden pr-2">
+              <div class="text-xs font-bold text-white truncate">${title}</div>
+              <div class="text-[10px] text-slate-400 font-mono">${epCode} · ${ep.info && ep.info.duration ? ep.info.duration : 'Episode'}</div>
+            </div>
+            <button onclick="closeRemoteSeriesExplorer(); sendRemoteCmd('TUNE_CHANNEL', { id: 'ep_${ep.id}', url: '${safeEpUrl}', name: '${safeTitle}', logo: '${safeLogo}', program: 'TV Series Episode', type: 'series' })" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shrink-0 active:scale-95 transition flex items-center gap-1">
+              <i class="fa-solid fa-play text-[10px]"></i> Play
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      const list = document.getElementById('rem-series-episode-list');
+      if (list) list.innerHTML = epListHtml || `<div class="p-3 text-xs text-slate-500 text-center">No episodes in Season ${seasonNum}.</div>`;
+    }
+
+    function closeRemoteSeriesExplorer() {
+      const modal = document.getElementById('rem-modal-series');
+      if (modal) modal.classList.add('hidden');
     }
 
     function renderRemoteFavsList() {
@@ -4617,19 +4929,19 @@
         }
       };
 
-      window.connectXtreamApi = async function() {
-        const host = document.getElementById('input-xtream-host')?.value.trim();
-        const user = document.getElementById('input-xtream-user')?.value.trim();
-        const pass = document.getElementById('input-xtream-pass')?.value.trim();
+      window.connectXtreamApi = async function(overrideHost, overrideUser, overridePass) {
+        const host = overrideHost || document.getElementById('input-xtream-host')?.value.trim();
+        const user = overrideUser || document.getElementById('input-xtream-user')?.value.trim();
+        const pass = overridePass || document.getElementById('input-xtream-pass')?.value.trim();
         
         const { host: cleanHost, username: cleanUser, password: cleanPass } = parseXtreamInput(host, user, pass);
 
         if (!cleanHost || (!cleanUser && !user) || (!cleanPass && !pass)) {
-          alert('Please enter Host, Username, and Password for Xtream API (or paste a full get.php URL in Host).');
+          if (typeof engine !== 'undefined' && engine.showToast) engine.showToast('Please enter Host, Username, and Password for Xtream API', 'error');
           return;
         }
 
-        engine.showSpinner(true, 'Connecting to Xtream API...');
+        if (typeof engine !== 'undefined') engine.showSpinner(true, 'Connecting to Xtream API...');
         try {
           const count = await xtreamConnector.fetchXtreamPlaylist(cleanHost, cleanUser, cleanPass);
           QuantumSessionStore.saveSession({
@@ -4640,12 +4952,18 @@
           });
           QuantumSessionStore.saveChannels(state.channels);
           window.updateSessionBannerUI();
-          engine.showSpinner(false);
+          if (typeof engine !== 'undefined') engine.showSpinner(false);
           closeM3uModal();
-          alert(`Successfully imported ${count.toLocaleString()} streams from Xtream API! Credentials saved.`);
+          if (typeof engine !== 'undefined' && engine.showToast) {
+            engine.showToast(`Imported ${count.toLocaleString()} streams from Xtream API!`, 'success');
+          }
+          broadcastTVState();
+          return count;
         } catch (e) {
-          engine.showSpinner(false);
-          alert(`Xtream API Error: ${e.message}`);
+          if (typeof engine !== 'undefined') engine.showSpinner(false);
+          if (typeof engine !== 'undefined' && engine.showToast) {
+            engine.showToast(`Xtream API Error: ${e.message}`, 'error');
+          }
         }
       };
 
