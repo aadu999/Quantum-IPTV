@@ -494,8 +494,8 @@
       <!-- Tab Content: M3U -->
       <div id="provider-section-m3u" class="flex flex-col gap-3 text-xs">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">M3U Playlist URL</label>
-          <input id="input-m3u-url" type="text" value="https://iptv-org.github.io/iptv/countries/in.m3u" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">M3U Playlist URL(s) <span class="text-slate-500 font-normal">(Single or Paste Batch Links)</span></label>
+          <textarea id="input-m3u-url" rows="3" placeholder="https://example.com/playlist.m3u&#10;http://server.com/get.php?username=...&amp;password=...&amp;type=m3u_plus" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500 resize-none">https://iptv-org.github.io/iptv/countries/in.m3u</textarea>
         </div>
 
         <div class="flex flex-col gap-1.5">
@@ -2309,7 +2309,37 @@
       }
     }
 
-    async function loadM3uPlaylist(url, isBackground = false, defaultLanguage = null) {
+    async function loadM3uPlaylist(rawInput, isBackground = false, defaultLanguage = null) {
+      if (!rawInput) return;
+      const urls = String(rawInput)
+        .split(/[\r\n\s]+/)
+        .map(u => u.trim())
+        .filter(u => u.startsWith('http://') || u.startsWith('https://'));
+
+      if (urls.length === 0) return;
+
+      if (urls.length > 1) {
+        if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, `Importing ${urls.length} M3U Playlists...`);
+        let importedTotal = 0;
+        for (let i = 0; i < urls.length; i++) {
+          if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, `Parsing Feed ${i + 1}/${urls.length}...`);
+          try {
+            await loadM3uSinglePlaylist(urls[i], true, defaultLanguage);
+            importedTotal++;
+          } catch (e) {}
+        }
+        if (!isBackground && !state.isRemoteClient) {
+          engine.showSpinner(false);
+          closeModals();
+          alert(`Batch Import Completed!\nSuccessfully parsed ${importedTotal}/${urls.length} feeds.\nTotal Active Channels: ${state.channels.length.toLocaleString()}`);
+        }
+        return;
+      }
+
+      return await loadM3uSinglePlaylist(urls[0], isBackground, defaultLanguage);
+    }
+
+    async function loadM3uSinglePlaylist(url, isBackground = false, defaultLanguage = null) {
       if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, "Fetching M3U Playlist...");
       const startTime = Date.now();
 
