@@ -527,6 +527,20 @@
       </h3>
       <p class="text-xs text-slate-400 mt-1 mb-3">Connect M3U Playlists, Xtream Codes API, Stalker Portals, or XMLTV EPG guides.</p>
 
+      <!-- Active Saved Session Banner -->
+      <div id="m3u-session-banner" class="hidden mb-3 p-2.5 bg-emerald-950/60 border border-emerald-800/60 rounded-xl text-emerald-300 text-[11px] flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-2 overflow-hidden">
+          <i class="fa-solid fa-circle-check text-emerald-400 text-sm shrink-0"></i>
+          <div class="overflow-hidden">
+            <div class="font-semibold text-emerald-200 text-xs">Saved Session Active</div>
+            <div id="m3u-session-status-text" class="text-[10px] text-emerald-400/90 truncate">Saved server credentials ready</div>
+          </div>
+        </div>
+        <button onclick="clearSavedConnectionSession()" class="px-2 py-1 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 text-[10px] font-semibold rounded-lg transition shrink-0">
+          Disconnect & Clear
+        </button>
+      </div>
+
       <!-- Provider Tabs -->
       <div class="flex items-center gap-2 border-b border-slate-800 mb-4 text-xs">
         <button id="tab-provider-m3u" onclick="switchProviderTab('m3u')" class="pb-2 border-b-2 border-brand-500 text-brand-400 font-bold transition">M3U Playlist</button>
@@ -1197,6 +1211,65 @@
         program: "European Headline Edition"
       }
     ];
+
+    const QuantumSessionStore = {
+      KEY: 'quantum_iptv_session_v2',
+      CHANNELS_KEY: 'quantum_iptv_saved_channels_v2',
+
+      saveSession(data = {}) {
+        try {
+          const current = this.loadSession() || {};
+          const updated = { ...current, ...data, lastUpdated: Date.now() };
+          localStorage.setItem(this.KEY, JSON.stringify(updated));
+        } catch (e) {}
+      },
+
+      loadSession() {
+        try {
+          const raw = localStorage.getItem(this.KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          return null;
+        }
+      },
+
+      saveChannels(channels) {
+        try {
+          if (!channels || !Array.isArray(channels) || channels.length === 0) return;
+          const toSave = channels.slice(0, 5000).map(c => ({
+            id: c.id,
+            name: c.name,
+            url: c.url,
+            logo: c.logo,
+            group: c.group,
+            language: c.language,
+            country: c.country,
+            type: c.type,
+            vodId: c.vodId,
+            rating: c.rating,
+            program: c.program,
+            sources: c.sources
+          }));
+          localStorage.setItem(this.CHANNELS_KEY, JSON.stringify(toSave));
+        } catch (e) {}
+      },
+
+      loadChannels() {
+        try {
+          const raw = localStorage.getItem(this.CHANNELS_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          return null;
+        }
+      },
+
+      clearSession() {
+        try {
+          localStorage.removeItem(this.KEY);
+          localStorage.removeItem(this.CHANNELS_KEY);
+        } catch (e) {}
+      }
+    };
 
     const state = {
       channels: [...DEFAULT_PRESET_CHANNELS],
@@ -2473,6 +2546,11 @@
       if (currentChEpg) currentChEpg.textContent = channel.program || "Live Stream";
 
       recordUserInteraction(channel);
+      QuantumSessionStore.saveSession({
+        lastChannelIndex: index,
+        lastChannelId: channel.id,
+        lastChannelUrl: channel.url
+      });
       engine.load(channel.url);
       renderChannelList();
       broadcastTVState();
@@ -4214,6 +4292,45 @@
       window.openSeriesExplorer = openSeriesExplorer;
       window.state = state;
 
+      window.updateSessionBannerUI = function(session = null) {
+        const banner = document.getElementById('m3u-session-banner');
+        const text = document.getElementById('m3u-session-status-text');
+        if (!banner) return;
+
+        const activeSession = session || QuantumSessionStore.loadSession();
+        if (activeSession && (activeSession.xtreamHost || activeSession.customM3uUrl || activeSession.stalkerUrl)) {
+          let desc = 'Saved connection session active';
+          if (activeSession.providerType === 'xtream' && activeSession.xtreamHost) {
+            desc = `Xtream API: ${activeSession.xtreamHost} (${activeSession.xtreamUser || 'user'})`;
+          } else if (activeSession.providerType === 'm3u' && activeSession.customM3uUrl) {
+            desc = `M3U URL: ${activeSession.customM3uUrl}`;
+          } else if (activeSession.providerType === 'stalker' && activeSession.stalkerUrl) {
+            desc = `Stalker: ${activeSession.stalkerUrl}`;
+          }
+          if (text) text.textContent = desc;
+          banner.classList.remove('hidden');
+        } else {
+          banner.classList.add('hidden');
+        }
+      };
+
+      window.clearSavedConnectionSession = function() {
+        if (confirm('Disconnect current session and clear saved server credentials?')) {
+          QuantumSessionStore.clearSession();
+          state.lastXtreamHost = null;
+          state.lastXtreamUser = null;
+          state.lastXtreamPass = null;
+          const xtreamHostInput = document.getElementById('input-xtream-host');
+          const xtreamUserInput = document.getElementById('input-xtream-user');
+          const xtreamPassInput = document.getElementById('input-xtream-pass');
+          if (xtreamHostInput) xtreamHostInput.value = '';
+          if (xtreamUserInput) xtreamUserInput.value = '';
+          if (xtreamPassInput) xtreamPassInput.value = '';
+          window.updateSessionBannerUI();
+          alert('Saved session credentials and stored channels cleared.');
+        }
+      };
+
       window.connectXtreamApi = async function() {
         const host = document.getElementById('input-xtream-host')?.value.trim();
         const user = document.getElementById('input-xtream-user')?.value.trim();
@@ -4229,9 +4346,17 @@
         engine.showSpinner(true, 'Connecting to Xtream API...');
         try {
           const count = await xtreamConnector.fetchXtreamPlaylist(cleanHost, cleanUser, cleanPass);
+          QuantumSessionStore.saveSession({
+            providerType: 'xtream',
+            xtreamHost: cleanHost,
+            xtreamUser: cleanUser,
+            xtreamPass: cleanPass
+          });
+          QuantumSessionStore.saveChannels(state.channels);
+          window.updateSessionBannerUI();
           engine.showSpinner(false);
           closeM3uModal();
-          alert(`Successfully imported ${count.toLocaleString()} streams from Xtream API!`);
+          alert(`Successfully imported ${count.toLocaleString()} streams from Xtream API! Credentials saved.`);
         } catch (e) {
           engine.showSpinner(false);
           alert(`Xtream API Error: ${e.message}`);
@@ -4248,6 +4373,13 @@
         engine.showSpinner(true, 'Connecting Stalker Portal...');
         try {
           await stalkerConnector.fetchStalkerPortal(portal, mac);
+          QuantumSessionStore.saveSession({
+            providerType: 'stalker',
+            stalkerUrl: portal,
+            stalkerMac: mac
+          });
+          QuantumSessionStore.saveChannels(state.channels);
+          window.updateSessionBannerUI();
           engine.showSpinner(false);
           closeM3uModal();
           alert('Stalker Portal connected successfully!');
@@ -4266,6 +4398,7 @@
         engine.showSpinner(true, 'Downloading XMLTV EPG...');
         try {
           const mapped = await xmltvParser.loadExternalEPG(url);
+          QuantumSessionStore.saveSession({ xmltvUrl: url });
           engine.showSpinner(false);
           closeM3uModal();
           alert(`Successfully mapped ${mapped} broadcast guide entries from XMLTV feed!`);
@@ -4279,7 +4412,16 @@
         btnFetchM3u.addEventListener('click', () => {
           const urlInput = document.getElementById('input-m3u-url');
           if (urlInput && urlInput.value) {
-            loadM3uPlaylist(urlInput.value.trim());
+            const url = urlInput.value.trim();
+            loadM3uPlaylist(url);
+            QuantumSessionStore.saveSession({
+              providerType: 'm3u',
+              customM3uUrl: url
+            });
+            setTimeout(() => {
+              QuantumSessionStore.saveChannels(state.channels);
+              if (typeof window.updateSessionBannerUI === 'function') window.updateSessionBannerUI();
+            }, 1200);
           }
         });
       }
@@ -4572,13 +4714,49 @@
     const workerEngine = new QuantumWorkerEngine();
 
     window.onload = function () {
-      // Load offline static bundle fallback if offline
-      const cached = QuantumOfflineCache.loadBundle();
-      if (cached && cached.channels && cached.channels.length > 0) {
-        const sanitized = cached.channels.map(ch => sanitizeChannel(ch));
+      // 1. Restore persistent QuantumSessionStore session & credentials
+      const savedSession = QuantumSessionStore.loadSession();
+      if (savedSession) {
+        if (savedSession.xtreamHost) state.lastXtreamHost = savedSession.xtreamHost;
+        if (savedSession.xtreamUser) state.lastXtreamUser = savedSession.xtreamUser;
+        if (savedSession.xtreamPass) state.lastXtreamPass = savedSession.xtreamPass;
+
+        const xtreamHostInput = document.getElementById('input-xtream-host');
+        const xtreamUserInput = document.getElementById('input-xtream-user');
+        const xtreamPassInput = document.getElementById('input-xtream-pass');
+        const m3uUrlInput = document.getElementById('input-m3u-url');
+        const stalkerUrlInput = document.getElementById('input-stalker-url');
+        const stalkerMacInput = document.getElementById('input-stalker-mac');
+        const xmltvUrlInput = document.getElementById('input-xmltv-url');
+
+        if (xtreamHostInput && savedSession.xtreamHost) xtreamHostInput.value = savedSession.xtreamHost;
+        if (xtreamUserInput && savedSession.xtreamUser) xtreamUserInput.value = savedSession.xtreamUser;
+        if (xtreamPassInput && savedSession.xtreamPass) xtreamPassInput.value = savedSession.xtreamPass;
+        if (m3uUrlInput && savedSession.customM3uUrl) m3uUrlInput.value = savedSession.customM3uUrl;
+        if (stalkerUrlInput && savedSession.stalkerUrl) stalkerUrlInput.value = savedSession.stalkerUrl;
+        if (stalkerMacInput && savedSession.stalkerMac) stalkerMacInput.value = savedSession.stalkerMac;
+        if (xmltvUrlInput && savedSession.xmltvUrl) xmltvUrlInput.value = savedSession.xmltvUrl;
+
+        if (typeof window.updateSessionBannerUI === 'function') {
+          window.updateSessionBannerUI(savedSession);
+        }
+      }
+
+      // 2. Restore saved channels bundle if available
+      const savedChannels = QuantumSessionStore.loadChannels();
+      if (savedChannels && Array.isArray(savedChannels) && savedChannels.length > 0) {
+        const sanitized = savedChannels.map(ch => sanitizeChannel(ch));
         state.channels = sanitized;
         state.filteredChannels = sanitized;
+      } else {
+        const cached = QuantumOfflineCache.loadBundle();
+        if (cached && cached.channels && cached.channels.length > 0) {
+          const sanitized = cached.channels.map(ch => sanitizeChannel(ch));
+          state.channels = sanitized;
+          state.filteredChannels = sanitized;
+        }
       }
+
       checkAndLaunchRemoteView();
       setupEventListeners();
       initRemoteSync();
@@ -4587,14 +4765,33 @@
         engine.initHls();
         renderChannelList();
         updateFavoritesUI();
-        playChannel(0);
 
-        loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
-        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
-        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tel.m3u', true, 'Telugu');
-        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tam.m3u', true, 'Tamil');
-        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
-        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
+        // 3. Resume last played channel index if saved
+        let initialIndex = 0;
+        if (savedSession && typeof savedSession.lastChannelIndex === 'number' && savedSession.lastChannelIndex >= 0 && savedSession.lastChannelIndex < state.filteredChannels.length) {
+          initialIndex = savedSession.lastChannelIndex;
+        }
+        playChannel(initialIndex);
+
+        // 4. Background re-sync for active provider session
+        if (savedSession && savedSession.providerType === 'xtream' && savedSession.xtreamHost && savedSession.xtreamUser && savedSession.xtreamPass) {
+          xtreamConnector.fetchXtreamPlaylist(savedSession.xtreamHost, savedSession.xtreamUser, savedSession.xtreamPass)
+            .then(() => {
+              renderChannelList();
+              QuantumSessionStore.saveChannels(state.channels);
+            })
+            .catch(err => console.warn('Background Xtream re-sync warning:', err.message));
+        } else if (savedSession && savedSession.providerType === 'm3u' && savedSession.customM3uUrl) {
+          loadM3uPlaylist(savedSession.customM3uUrl, true);
+        } else if (!savedChannels || savedChannels.length === 0) {
+          // Default public fallback playlists if no saved channels exist
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tel.m3u', true, 'Telugu');
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tam.m3u', true, 'Tamil');
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
+          loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
+        }
       } else {
         loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
         loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
