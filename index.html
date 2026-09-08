@@ -756,6 +756,79 @@
     </div>
   </div>
 
+  <!-- Modal: VOD Movie Explorer & Info Card -->
+  <div id="modal-movie-explorer" class="fixed inset-0 bg-black/85 backdrop-blur-md z-[110] flex items-center justify-center p-2 sm:p-4 hidden transition-all duration-300">
+    <div id="movie-explorer-box" class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden transition-all duration-300">
+      
+      <!-- Top Action Bar -->
+      <div class="h-12 bg-slate-950/80 border-b border-slate-800/80 px-4 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded bg-brand-500/20 text-brand-400 border border-brand-500/30 text-[10px] font-bold uppercase tracking-wider">
+            <i class="fa-solid fa-film mr-1"></i>Movie Info
+          </span>
+          <span id="movie-header-title" class="text-xs font-semibold text-slate-300 truncate max-w-[200px] sm:max-w-md">Movie Details</span>
+        </div>
+        
+        <button onclick="closeMovieExplorer()" class="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <!-- Main Scrollable Content Area -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+        
+        <!-- Movie Details Card -->
+        <div class="flex flex-col sm:flex-row gap-5 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+          
+          <!-- Poster Image -->
+          <img id="movie-poster" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23475569'%3E%3Crect width='24' height='24' rx='4'/%3E%3C/svg%3E" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-36 sm:w-48 h-52 sm:h-64 rounded-xl object-cover bg-slate-800 border border-slate-700 shadow-xl shrink-0 self-center sm:self-start">
+          
+          <!-- Movie Metadata Info -->
+          <div class="flex-1 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                <h2 id="movie-title" class="text-xl sm:text-2xl font-black text-white tracking-tight">Movie Title</h2>
+                <div id="movie-rating-badge" class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold font-mono flex items-center gap-1.5 shrink-0 shadow">
+                  <i class="fa-solid fa-star text-amber-400"></i>
+                  <span id="movie-rating-val">8.5 / 10</span>
+                </div>
+              </div>
+
+              <!-- Tags Strip: Year, Duration, Genre -->
+              <div class="flex items-center gap-2 flex-wrap text-xs text-slate-400 mb-3">
+                <span id="movie-genre" class="px-2 py-0.5 rounded-md bg-brand-950/80 text-brand-300 border border-brand-800/50 font-medium">VOD Movie</span>
+                <span id="movie-year" class="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-slate-300">2024</span>
+                <span id="movie-duration" class="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-slate-400"><i class="fa-regular fa-clock mr-1 text-[10px]"></i>HD Movie</span>
+              </div>
+
+              <!-- Director & Cast -->
+              <div class="text-xs text-slate-400 space-y-1 mb-3 leading-relaxed">
+                <div><strong class="text-slate-300 font-semibold">Director: </strong><span id="movie-director" class="text-slate-400">Official Production</span></div>
+                <div><strong class="text-slate-300 font-semibold">Cast: </strong><span id="movie-cast" class="text-slate-400">Starring ensemble cast</span></div>
+              </div>
+
+              <!-- Plot Synopsis -->
+              <p id="movie-plot" class="text-xs text-slate-300/90 leading-relaxed max-h-32 overflow-y-auto pr-1 font-sans">
+                Full movie synopsis and detailed story outline...
+              </p>
+            </div>
+
+            <!-- Action Buttons: Play Movie & Favorite -->
+            <div class="flex items-center gap-3 pt-3 border-t border-slate-800/80">
+              <button id="btn-play-movie-now" class="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-bold text-xs tracking-wider uppercase transition shadow-lg shadow-brand-600/30 flex items-center justify-center gap-2 active:scale-95">
+                <i class="fa-solid fa-play text-sm"></i>Play Movie Now
+              </button>
+              <button id="btn-movie-fav-toggle" class="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center gap-1.5">
+                <i class="fa-regular fa-star text-amber-400"></i>Favorite
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- MOBILE REMOTE SCREEN INTERFACE (Active ONLY when opened with ?remote=ROOM_ID) -->
   <div id="mobile-remote-app" class="fixed inset-0 bg-slate-950 z-[999999] flex flex-col hidden overflow-hidden select-none font-sans">
     
@@ -1719,6 +1792,7 @@
                       name: item.name,
                       url: vodStreamUrl,
                       logo: item.stream_icon,
+                      vodId: item.stream_id,
                       group: 'VOD Movies',
                       language: inferChannelLanguage(item.name),
                       type: 'vod',
@@ -1822,6 +1896,21 @@
           return JSON.parse(text);
         } catch (e) {
           console.warn(`Failed to fetch series info for ID ${seriesId}:`, e.message);
+          return null;
+        }
+      }
+
+      async fetchVodInfo(vodId) {
+        if (!vodId || !state.lastXtreamHost || !state.lastXtreamUser || !state.lastXtreamPass) return null;
+        const host = state.lastXtreamHost;
+        const username = state.lastXtreamUser;
+        const password = state.lastXtreamPass;
+        const infoUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_info&vod_id=${encodeURIComponent(vodId)}`;
+        try {
+          const text = await fetchWithProxyFallback(infoUrl);
+          return JSON.parse(text);
+        } catch (e) {
+          console.warn(`Failed to fetch VOD info for ID ${vodId}:`, e.message);
           return null;
         }
       }
@@ -2371,6 +2460,11 @@
         return;
       }
 
+      if (channel.type === 'vod' || (channel.url && channel.url.includes('/movie/'))) {
+        openMovieExplorer(channel);
+        return;
+      }
+
       if (currentChName) currentChName.textContent = channel.name;
       if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
       if (currentChEpg) currentChEpg.textContent = channel.program || "Live Stream";
@@ -2541,6 +2635,102 @@
       const modal = document.getElementById('modal-series-explorer');
       if (modal) modal.classList.add('hidden');
     }
+
+    let currentMovieChannel = null;
+
+    async function openMovieExplorer(channel) {
+      if (!channel) return;
+      currentMovieChannel = channel;
+
+      const modal = document.getElementById('modal-movie-explorer');
+      if (!modal) return;
+
+      const titleHeader = document.getElementById('movie-header-title');
+      const titleMain = document.getElementById('movie-title');
+      const poster = document.getElementById('movie-poster');
+      const ratingVal = document.getElementById('movie-rating-val');
+      const genre = document.getElementById('movie-genre');
+      const year = document.getElementById('movie-year');
+      const duration = document.getElementById('movie-duration');
+      const director = document.getElementById('movie-director');
+      const cast = document.getElementById('movie-cast');
+      const plot = document.getElementById('movie-plot');
+      const btnPlay = document.getElementById('btn-play-movie-now');
+      const btnFav = document.getElementById('btn-movie-fav-toggle');
+
+      if (titleHeader) titleHeader.textContent = channel.name;
+      if (titleMain) titleMain.textContent = channel.name;
+      if (poster) poster.src = channel.cover || channel.logo || FALLBACK_LOGO;
+      if (ratingVal) ratingVal.textContent = channel.rating ? `${channel.rating} / 10` : '8.5 / 10';
+      if (genre) genre.textContent = channel.genre || channel.group || 'VOD Movie';
+      if (year) year.textContent = channel.releaseDate || '2024';
+      if (duration) duration.innerHTML = `<i class="fa-regular fa-clock mr-1 text-[10px]"></i>${channel.duration || '2h 00m'}`;
+      if (director) director.textContent = channel.director || 'Official Production';
+      if (cast) cast.textContent = channel.cast || 'Starring ensemble cast';
+      if (plot) plot.textContent = channel.plot || `Watch high-definition movie stream for ${channel.name}. Click Play Movie Now to start watching.`;
+
+      if (btnFav) {
+        const isFav = state.favorites.includes(channel.id);
+        btnFav.innerHTML = isFav ? '<i class="fa-solid fa-star text-amber-400 mr-1"></i>Favorited' : '<i class="fa-regular fa-star mr-1"></i>Favorite';
+        btnFav.onclick = (e) => {
+          toggleFavorite(channel.id, e);
+          const nowFav = state.favorites.includes(channel.id);
+          btnFav.innerHTML = nowFav ? '<i class="fa-solid fa-star text-amber-400 mr-1"></i>Favorited' : '<i class="fa-regular fa-star mr-1"></i>Favorite';
+        };
+      }
+
+      if (btnPlay) {
+        btnPlay.onclick = () => {
+          closeMovieExplorer();
+          startMoviePlayback(channel);
+        };
+      }
+
+      modal.classList.remove('hidden');
+
+      // Fetch rich info if available
+      const vodId = channel.vodId || (channel.id && channel.id.startsWith('xt_vod_') ? channel.id.replace('xt_vod_', '') : null);
+      if (vodId && xtreamConnector) {
+        const infoData = await xtreamConnector.fetchVodInfo(vodId);
+        if (infoData && infoData.info) {
+          const info = infoData.info;
+          if (info.movie_image || info.cover_big) poster.src = info.movie_image || info.cover_big;
+          if (info.rating) ratingVal.textContent = `${info.rating} / 10`;
+          if (info.genre) genre.textContent = info.genre;
+          if (info.releasedate || info.year) year.textContent = info.releasedate || info.year;
+          if (info.duration || info.duration_secs) {
+            const mins = info.duration ? info.duration : `${Math.floor(info.duration_secs / 60)} mins`;
+            duration.innerHTML = `<i class="fa-regular fa-clock mr-1 text-[10px]"></i>${mins}`;
+          }
+          if (info.director) director.textContent = info.director;
+          if (info.actors || info.cast) cast.textContent = info.actors || info.cast;
+          if (info.description || info.plot) plot.textContent = info.description || info.plot;
+        }
+      }
+    }
+
+    function closeMovieExplorer() {
+      const modal = document.getElementById('modal-movie-explorer');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function startMoviePlayback(channel) {
+      if (!channel) return;
+      const idx = state.filteredChannels.findIndex(c => c.id === channel.id);
+      if (idx !== -1) {
+        state.currentChannelIndex = idx;
+      }
+      if (currentChName) currentChName.textContent = channel.name;
+      if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
+      if (currentChEpg) currentChEpg.textContent = channel.group || "VOD Movie";
+
+      recordUserInteraction(channel);
+      engine.load(channel.url);
+      renderChannelList();
+      broadcastTVState();
+    }
+
+    window.openMovieExplorer = openMovieExplorer;
 
     function playEpisodeStream(streamUrl, episodeTitle = "Episode") {
       closeSeriesExplorer();
@@ -4277,9 +4467,13 @@
       const modalRemote = document.getElementById('modal-remote');
       const modalM3u = document.getElementById('modal-m3u');
       const modalQuarantine = document.getElementById('modal-quarantine');
+      const modalSeries = document.getElementById('modal-series-explorer');
+      const modalMovie = document.getElementById('modal-movie-explorer');
       if (modalRemote) modalRemote.classList.add('hidden');
       if (modalM3u) modalM3u.classList.add('hidden');
       if (modalQuarantine) modalQuarantine.classList.add('hidden');
+      if (modalSeries) modalSeries.classList.add('hidden');
+      if (modalMovie) modalMovie.classList.add('hidden');
     }
 
     function copyToClipboard(text) {
