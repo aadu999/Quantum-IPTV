@@ -1,0 +1,2137 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Quantum IPTV & IoT Remote Player</title>
+  
+  <!-- Inter & JetBrains Mono Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- HLS.js Video Streaming Engine -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
+  
+  <!-- QRCode.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  
+  <!-- MQTT.js Client for Real-Time IoT Remote Pairing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.15.2/mqtt.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              900: '#1e1b4b'
+            }
+          }
+        }
+      }
+    };
+
+    // Safe global fallback icon to eliminate inline unescaped SyntaxErrors
+    const FALLBACK_LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath fill='%23ffffff' d='M10 8l6 4-6 4V8z'/%3E%3C/svg%3E";
+
+    function handleLogoError(img) {
+      if (!img) return;
+      img.onerror = null;
+      img.src = FALLBACK_LOGO;
+    }
+  </script>
+
+  <style>
+    /* Absolute prevention of mobile double-tap and pinch zoom */
+    html, body {
+      touch-action: manipulation !important;
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      overscroll-behavior: none !important;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    button, input, select, a, .touch-target {
+      touch-action: manipulation !important;
+      -webkit-tap-highlight-color: transparent !important;
+      user-select: none !important;
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, 0.4);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(99, 102, 241, 0.8);
+    }
+
+    /* CSS Theater Fullscreen Mode */
+    .theater-fullscreen {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 99999 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: #000 !important;
+    }
+
+    /* Fullscreen floating overlay controls */
+    .theater-fullscreen #player-controls,
+    #video-stage:fullscreen #player-controls {
+      position: absolute !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      z-index: 40 !important;
+      background: linear-gradient(to top, rgba(2, 6, 23, 0.95) 0%, rgba(2, 6, 23, 0.7) 60%, transparent 100%) !important;
+      border-top: none !important;
+      padding-bottom: 1.5rem !important;
+    }
+
+    /* Fullscreen inactivity auto-hide */
+    .fullscreen-idle {
+      cursor: none !important;
+    }
+    .fullscreen-idle #player-controls {
+      opacity: 0 !important;
+      transform: translateY(28px) !important;
+      pointer-events: none !important;
+    }
+    .fullscreen-idle #exit-theater-btn,
+    .fullscreen-idle #engine-hud,
+    .fullscreen-idle #quick-stream-badges,
+    .fullscreen-idle #unmute-banner {
+      opacity: 0 !important;
+      transform: translateY(-20px) !important;
+      pointer-events: none !important;
+    }
+
+    #player-controls,
+    #exit-theater-btn,
+    #engine-hud,
+    #quick-stream-badges,
+    #unmute-banner {
+      transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.1); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .pulse-indicator {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden select-none bg-slate-950 font-sans text-slate-100">
+
+  <!-- TV Ultra-Slim Top Bar -->
+  <header id="tv-header" class="h-11 bg-slate-900/90 border-b border-slate-800/80 px-3 flex items-center justify-between z-30 shrink-0 backdrop-blur-md">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-brand-500/20">
+          <i class="fa-solid fa-satellite-dish text-[11px] text-white"></i>
+        </div>
+        <span class="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
+          Quantum<span class="text-brand-400 font-extrabold text-[11px] px-1.5 py-0.5 rounded bg-brand-500/10 border border-brand-500/20">IPTV</span>
+        </span>
+      </div>
+
+      <!-- Quick Status Badges -->
+      <div id="quick-stream-badges" class="hidden md:flex items-center gap-2 text-[11px]">
+        <span id="badge-source" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block mr-1"></span>Ready
+        </span>
+        <span id="badge-channels-count" class="px-2 py-0.5 rounded-full bg-slate-800/70 text-slate-400 font-mono">
+          Loading Channels...
+        </span>
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="flex items-center gap-1.5 sm:gap-2">
+      <!-- M3U Playlist Loader Button -->
+      <button id="btn-open-m3u-modal" class="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 rounded-md border border-slate-700/70 flex items-center gap-1.5 transition">
+        <i class="fa-solid fa-link text-brand-400"></i>
+        <span class="hidden sm:inline">Load M3U</span>
+      </button>
+
+      <!-- Scannable Mobile Remote Trigger -->
+      <button id="btn-open-remote-modal" class="px-2.5 py-1 text-xs font-semibold text-white bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 rounded-md shadow-md shadow-brand-500/20 flex items-center gap-1.5 transition">
+        <i class="fa-solid fa-qrcode"></i>
+        <span>Scan Remote</span>
+        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-indicator hidden sm:inline-block"></span>
+      </button>
+
+      <!-- Toggle Sidebar -->
+      <button id="btn-toggle-sidebar" class="w-8 h-8 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center border border-slate-700/60 transition" title="Toggle Channel List">
+        <i class="fa-solid fa-list-ul text-xs"></i>
+      </button>
+
+      <!-- Fullscreen Button -->
+      <button id="btn-header-fullscreen" class="w-8 h-8 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center border border-slate-700/60 transition" title="Toggle Theater Fullscreen">
+        <i class="fa-solid fa-expand text-xs"></i>
+      </button>
+    </div>
+  </header>
+
+  <main class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+    
+    <!-- Video Player Container / Stage -->
+    <section id="video-stage" class="flex-1 flex flex-col bg-black relative overflow-hidden group select-none">
+      
+      <!-- Video Element -->
+      <div class="relative w-full h-full flex items-center justify-center overflow-hidden">
+        <video id="video-player" class="w-full h-full object-contain bg-black" playsinline preload="auto"></video>
+        
+        <!-- Loading Spinner Overlay -->
+        <div id="video-spinner" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center gap-3 z-20 pointer-events-none transition-opacity duration-300 hidden opacity-0">
+          <div class="w-12 h-12 rounded-full border-4 border-brand-500/20 border-t-brand-500 animate-spin"></div>
+          <div class="text-xs font-medium text-slate-300 tracking-wide flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span>
+            <span id="spinner-message">Tuning Quantum Stream...</span>
+          </div>
+        </div>
+
+        <!-- Autoplay Audio Unmute Prompt Pill (Bypasses Browser Autoplay Restrictions) -->
+        <div id="unmute-banner" class="absolute top-16 left-1/2 -translate-x-1/2 z-40 hidden">
+          <button onclick="unmuteAudioNow()" class="px-4 py-2 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-xl flex items-center gap-2 transition hover:scale-105 active:scale-95 animate-bounce">
+            <i class="fa-solid fa-volume-high text-sm"></i>
+            <span>Tap to Enable Audio</span>
+          </button>
+        </div>
+
+        <!-- Exit Fullscreen Floating Pill -->
+        <div id="exit-theater-btn" class="absolute top-4 right-4 z-40 hidden">
+          <button onclick="toggleFullscreenMode(false)" class="px-3 py-1.5 rounded-full bg-slate-900/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold backdrop-blur-md border border-slate-700 shadow-xl flex items-center gap-2 transition hover:scale-105 active:scale-95">
+            <i class="fa-solid fa-compress text-brand-400"></i>
+            <span>Exit Fullscreen</span>
+          </button>
+        </div>
+
+        <!-- Diagnostic Stream Telemetry HUD -->
+        <div id="engine-hud" class="absolute top-4 left-4 z-40 bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-lg p-2 text-[10px] font-mono text-slate-300 shadow-lg pointer-events-none flex flex-col gap-1 max-w-[240px]">
+          <div class="flex items-center justify-between text-slate-400">
+            <span class="flex items-center gap-1.5 font-bold text-white uppercase tracking-wider">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span id="hud-engine-status">LIVE HLS</span>
+            </span>
+            <span id="hud-res" class="text-cyan-400 font-semibold">HD</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Buffer Ahead:</span>
+            <span id="hud-buffer" class="text-emerald-400 font-bold">0.0s</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+            <div id="hud-buffer-bar" class="bg-gradient-to-r from-emerald-500 to-cyan-500 h-full w-0 transition-all duration-300"></div>
+          </div>
+          <div class="flex items-center justify-between text-[9px] text-slate-400">
+            <span>Watchdog Health:</span>
+            <span id="hud-health" class="text-slate-200">Active</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Video Controls Overlay Bar -->
+      <div id="player-controls" class="bg-slate-900/95 border-t border-slate-800/80 px-4 py-2.5 flex flex-col gap-2 z-30 transition-all duration-300 backdrop-blur-md">
+        
+        <!-- Stream Buffer Visualizer Strip -->
+        <div class="relative w-full h-1 bg-slate-800 rounded-full overflow-hidden cursor-pointer">
+          <div id="progress-buffer" class="absolute top-0 left-0 h-full bg-slate-700/70 w-0 transition-all duration-200"></div>
+          <div id="progress-played" class="absolute top-0 left-0 h-full bg-brand-500 w-0 transition-all duration-100"></div>
+        </div>
+
+        <!-- Controls Row -->
+        <div class="flex items-center justify-between gap-3 text-xs">
+          
+          <!-- Left Controls: Play/Pause, Channel Step, Volume, Channel Name -->
+          <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button id="btn-play-pause" class="w-8 h-8 rounded-full bg-brand-600 hover:bg-brand-500 text-white flex items-center justify-center transition shadow-md shadow-brand-500/20 active:scale-90" title="Play/Pause (Space)">
+              <i class="fa-solid fa-play ml-0.5 text-xs"></i>
+            </button>
+
+            <button id="btn-prev-channel" class="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition" title="Previous Channel (P)">
+              <i class="fa-solid fa-backward-step text-[10px]"></i>
+            </button>
+            <button id="btn-next-channel" class="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition" title="Next Channel (N)">
+              <i class="fa-solid fa-forward-step text-[10px]"></i>
+            </button>
+
+            <!-- Volume Slider -->
+            <div class="flex items-center gap-1.5">
+              <button id="btn-mute" class="text-slate-400 hover:text-white transition w-5 text-center">
+                <i class="fa-solid fa-volume-high text-xs"></i>
+              </button>
+              <input id="vol-slider" type="range" min="0" max="1" step="0.05" value="1" class="w-16 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-500">
+            </div>
+
+            <!-- Current Channel Indicator -->
+            <div class="hidden sm:flex items-center gap-2 border-l border-slate-800 pl-3">
+              <img id="current-ch-logo" src="" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-5 h-5 rounded object-contain bg-slate-800 p-0.5 border border-slate-700">
+              <div class="flex flex-col">
+                <span id="current-ch-name" class="font-semibold text-white truncate max-w-[140px] md:max-w-[200px]">Select a Channel</span>
+                <span id="current-ch-epg" class="text-[10px] text-brand-400 truncate max-w-[140px] md:max-w-[200px]">Live Broadcast</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Controls: Aspect Ratio, PiP, Fullscreen -->
+          <div class="flex items-center gap-1.5 sm:gap-2">
+            <button id="btn-aspect" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-mono border border-slate-700/60" title="Cycle Aspect Ratio (16:9, Fill, Stretch)">
+              16:9
+            </button>
+            <button id="btn-pip" class="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition" title="Picture in Picture">
+              <i class="fa-solid fa-images text-[11px]"></i>
+            </button>
+            <button id="btn-fullscreen" class="w-8 h-8 rounded bg-brand-600/80 hover:bg-brand-500 text-white flex items-center justify-center transition active:scale-95" title="Full Screen (F)">
+              <i class="fa-solid fa-expand text-xs"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Channel & Guide Sidebar -->
+    <aside id="channel-sidebar" class="w-full md:w-80 lg:w-96 bg-slate-900 border-l border-slate-800 flex flex-col shrink-0 h-[45vh] md:h-auto z-20">
+      
+      <!-- Sidebar Navigation Tabs -->
+      <div class="flex items-center border-b border-slate-800 bg-slate-900/80 p-1 text-xs font-semibold">
+        <button id="tab-btn-channels" class="flex-1 py-1.5 text-center rounded-md bg-brand-600 text-white shadow-sm transition">
+          <i class="fa-solid fa-tv mr-1.5 text-[11px]"></i>Channels
+        </button>
+        <button id="tab-btn-epg" class="flex-1 py-1.5 text-center rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+          <i class="fa-solid fa-calendar-days mr-1.5 text-[11px]"></i>Guide (EPG)
+        </button>
+        <button id="tab-btn-favs" class="flex-1 py-1.5 text-center rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+          <i class="fa-solid fa-star mr-1.5 text-[11px]"></i>Favs (<span id="fav-count-badge">0</span>)
+        </button>
+      </div>
+
+      <!-- Search & Filters Strip -->
+      <div class="p-2.5 border-b border-slate-800 flex flex-col gap-2 bg-slate-950/40">
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-500"></i>
+          <input id="search-input" type="text" placeholder="Search channels, Asianet, news, sports..." class="w-full bg-slate-800/90 text-slate-200 text-xs rounded-lg pl-8 pr-3 py-2 border border-slate-700/60 focus:outline-none focus:border-brand-500 placeholder-slate-500 transition">
+        </div>
+
+        <div class="flex items-center gap-2">
+          <select id="region-filter" class="flex-1 bg-slate-800 text-slate-300 text-[11px] rounded-md px-2 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500">
+            <option value="ALL">All Regions</option>
+            <option value="IN">India (Asianet, etc.)</option>
+            <option value="GLOBAL">Global</option>
+            <option value="US">United States</option>
+            <option value="UK">United Kingdom</option>
+            <option value="FR">France</option>
+            <option value="DE">Germany</option>
+          </select>
+          <select id="category-filter" class="flex-1 bg-slate-800 text-slate-300 text-[11px] rounded-md px-2 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500">
+            <option value="ALL">All Categories</option>
+            <option value="News">News</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Sports">Sports</option>
+            <option value="Science">Science & Tech</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Channel List View Tab Container -->
+      <div id="view-channels" class="flex-1 overflow-y-auto divide-y divide-slate-800/60"></div>
+
+      <!-- EPG Program Schedule View Tab Container -->
+      <div id="view-epg" class="flex-1 overflow-y-auto p-3 hidden flex-col gap-3">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+          <span class="font-semibold uppercase tracking-wider text-[10px]">Today's Schedule</span>
+          <span class="text-brand-400 font-mono text-[11px]" id="epg-current-time">12:00 PM</span>
+        </div>
+        <div id="epg-timeline-list" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Favorites View Tab Container -->
+      <div id="view-favorites" class="flex-1 overflow-y-auto divide-y divide-slate-800/60 hidden">
+        <div id="favorites-empty-msg" class="p-6 text-center text-xs text-slate-500">
+          <i class="fa-regular fa-star text-2xl mb-2 text-slate-600 block"></i>
+          No favorite channels starred yet.<br>Click the star on any channel to pin it here.
+        </div>
+        <div id="favorites-list-container"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Modal: Scannable Remote & QR Code Pairing -->
+  <div id="modal-remote" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col items-center text-center relative">
+      <button id="btn-close-remote-modal" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark text-sm"></i>
+      </button>
+
+      <div class="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-400 text-lg mb-3">
+        <i class="fa-solid fa-mobile-screen"></i>
+      </div>
+
+      <h3 class="text-base font-bold text-white tracking-tight">Smartphone Remote Control</h3>
+      <p class="text-xs text-slate-400 mt-1 mb-4">Scan this QR code with any phone camera to control TV channels, volume, & EPG in real-time.</p>
+
+      <!-- QR Code Canvas Container -->
+      <div class="p-3 bg-white rounded-xl shadow-inner mb-3 flex items-center justify-center min-w-[190px] min-h-[190px]">
+        <div id="qrcode-container"></div>
+      </div>
+
+      <div class="w-full bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between text-xs font-mono mb-3">
+        <div class="text-left">
+          <div class="text-[10px] text-slate-500 uppercase">Room Session</div>
+          <div id="remote-room-id" class="text-brand-400 font-bold">ROOM-9942</div>
+        </div>
+        <button id="btn-copy-remote-link" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] transition">
+          <i class="fa-regular fa-copy mr-1"></i>Copy Link
+        </button>
+      </div>
+
+      <a id="btn-test-remote" href="#" target="_blank" class="w-full py-2 bg-brand-600 hover:bg-brand-500 text-white font-medium rounded-lg text-xs transition shadow-md shadow-brand-600/30 flex items-center justify-center gap-2">
+        <span>Open Remote in New Tab</span>
+        <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+      </a>
+    </div>
+  </div>
+
+  <!-- Modal: Custom M3U Playlist Input -->
+  <div id="modal-m3u" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl relative">
+      <button id="btn-close-m3u-modal" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark text-sm"></i>
+      </button>
+
+      <h3 class="text-base font-bold text-white flex items-center gap-2">
+        <i class="fa-solid fa-satellite text-brand-400"></i>
+        <span>Load M3U Stream Playlist</span>
+      </h3>
+      <p class="text-xs text-slate-400 mt-1 mb-4">Select from preconfigured regional bundles or paste any custom M3U playlist URL.</p>
+
+      <div class="flex flex-col gap-3 text-xs">
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">M3U Playlist URL</label>
+          <input id="input-m3u-url" type="text" value="https://iptv-org.github.io/iptv/countries/in.m3u" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-xs font-mono focus:outline-none focus:border-brand-500">
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[10px] uppercase font-bold text-slate-500">Fast Presets:</span>
+          <div class="grid grid-cols-2 gap-2 text-[11px]">
+            <button onclick="setM3uUrl('https://iptv-org.github.io/iptv/countries/in.m3u')" class="p-2 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 rounded text-left truncate text-slate-300">
+              <span class="font-bold text-white block">India (Asianet, etc.)</span>in.m3u (Fast)
+            </button>
+            <button onclick="setM3uUrl('https://iptv-org.github.io/iptv/index.m3u')" class="p-2 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 rounded text-left truncate text-slate-300">
+              <span class="font-bold text-white block">Global Full</span>index.m3u (10k+ Channels)
+            </button>
+            <button onclick="setM3uUrl('https://iptv-org.github.io/iptv/countries/us.m3u')" class="p-2 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 rounded text-left truncate text-slate-300">
+              <span class="font-bold text-white block">United States</span>us.m3u
+            </button>
+            <button onclick="setM3uUrl('https://iptv-org.github.io/iptv/categories/news.m3u')" class="p-2 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 rounded text-left truncate text-slate-300">
+              <span class="font-bold text-white block">Global News</span>news.m3u
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-2 flex items-center justify-end gap-2">
+          <button id="btn-cancel-m3u" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition">Cancel</button>
+          <button id="btn-fetch-m3u" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg shadow-md shadow-brand-500/20 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-cloud-arrow-down"></i>
+            <span>Fetch & Parse</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MOBILE REMOTE SCREEN INTERFACE (Active ONLY when opened with ?remote=ROOM_ID) -->
+  <div id="mobile-remote-app" class="fixed inset-0 bg-slate-950 z-[999999] flex flex-col hidden overflow-hidden select-none font-sans">
+    
+    <!-- Remote Header -->
+    <header class="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white text-sm shadow">
+          <i class="fa-solid fa-mobile-screen"></i>
+        </div>
+        <div>
+          <h1 class="text-xs font-bold text-white tracking-wide flex items-center gap-1.5">
+            <span>SMART TV REMOTE</span>
+            <span id="remote-room-tag" class="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-brand-400 font-mono"></span>
+          </h1>
+          <div class="flex items-center gap-1.5 text-[10px]">
+            <span id="remote-status-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="remote-conn-status" class="text-emerald-400 font-medium">Connected to TV</span>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="sendRemoteCmd('PLAY_PAUSE')" class="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center active:scale-90 transition">
+        <i class="fa-solid fa-power-off text-xs text-red-400"></i>
+      </button>
+    </header>
+
+    <!-- Remote Screen Body: D-Pad & Main Controls -->
+    <div id="remote-body-pad" class="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-between gap-4">
+      
+      <!-- Currently Playing Card on TV -->
+      <div class="w-full bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-lg">
+        <div class="flex items-center gap-3 overflow-hidden">
+          <img id="remote-now-logo" src="" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+          <div class="overflow-hidden text-left">
+            <div id="remote-now-channel" data-id="" class="text-xs font-bold text-white truncate">Asianet News</div>
+            <div id="remote-now-prog" class="text-[10px] text-brand-400 truncate">Live Satellite Broadcast</div>
+          </div>
+        </div>
+        <button id="remote-now-fav-btn" onclick="toggleCurrentPlayingFav()" class="text-slate-500 hover:text-amber-400 text-sm p-1.5 transition">
+          <i class="fa-regular fa-star"></i>
+        </button>
+      </div>
+
+      <!-- Quick Action Controls Row -->
+      <div class="w-full grid grid-cols-3 gap-3">
+        <button onclick="sendRemoteCmd('MUTE')" class="py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 active:bg-slate-800 flex flex-col items-center gap-1 transition">
+          <i class="fa-solid fa-volume-xmark text-sm"></i>
+          <span class="text-[10px] uppercase font-semibold">Mute</span>
+        </button>
+        <button onclick="sendRemoteCmd('FULLSCREEN')" class="py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-brand-400 active:bg-slate-800 flex flex-col items-center gap-1 transition">
+          <i class="fa-solid fa-expand text-sm"></i>
+          <span class="text-[10px] uppercase font-semibold">Fullscreen</span>
+        </button>
+        <button onclick="sendRemoteCmd('PLAY_PAUSE')" class="py-2.5 bg-brand-600 rounded-xl text-white active:bg-brand-500 flex flex-col items-center gap-1 shadow-md shadow-brand-600/30 transition">
+          <i class="fa-solid fa-play text-sm"></i>
+          <span class="text-[10px] uppercase font-bold">Play / Pause</span>
+        </button>
+      </div>
+
+      <!-- D-Pad Navigation Wheel -->
+      <div class="relative w-56 h-56 rounded-full bg-slate-900 border-2 border-slate-800 shadow-2xl flex items-center justify-center p-2">
+        <button onclick="sendRemoteCmd('CH_PREV')" class="absolute top-2 w-14 h-10 rounded-t-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 flex items-center justify-center active:scale-95 transition" title="Prev Channel">
+          <i class="fa-solid fa-chevron-up"></i>
+        </button>
+        <button onclick="sendRemoteCmd('VOL_DOWN')" class="absolute left-2 w-10 h-14 rounded-l-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 flex items-center justify-center active:scale-95 transition" title="Vol Down">
+          <i class="fa-solid fa-minus"></i>
+        </button>
+        <button onclick="sendRemoteCmd('OK')" class="w-20 h-20 rounded-full bg-gradient-to-tr from-brand-600 to-indigo-600 text-white font-bold text-sm shadow-xl flex items-center justify-center active:scale-90 transition">
+          OK
+        </button>
+        <button onclick="sendRemoteCmd('VOL_UP')" class="absolute right-2 w-10 h-14 rounded-r-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 flex items-center justify-center active:scale-95 transition" title="Vol Up">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+        <button onclick="sendRemoteCmd('CH_NEXT')" class="absolute bottom-2 w-14 h-10 rounded-b-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 flex items-center justify-center active:scale-95 transition" title="Next Channel">
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+      </div>
+
+      <!-- Dual Rockers: Volume & Channel -->
+      <div class="w-full flex items-center justify-around gap-6 px-4">
+        <div class="flex flex-col items-center bg-slate-900 border border-slate-800 rounded-2xl p-1.5 w-24">
+          <button onclick="sendRemoteCmd('VOL_UP')" class="w-full py-2.5 text-slate-300 active:text-white active:bg-slate-800 rounded-xl transition">
+            <i class="fa-solid fa-plus text-xs"></i>
+          </button>
+          <span class="text-[10px] font-bold text-slate-500 py-1 uppercase">VOL</span>
+          <button onclick="sendRemoteCmd('VOL_DOWN')" class="w-full py-2.5 text-slate-300 active:text-white active:bg-slate-800 rounded-xl transition">
+            <i class="fa-solid fa-minus text-xs"></i>
+          </button>
+        </div>
+
+        <div class="flex flex-col items-center bg-slate-900 border border-slate-800 rounded-2xl p-1.5 w-24">
+          <button onclick="sendRemoteCmd('CH_NEXT')" class="w-full py-2.5 text-slate-300 active:text-white active:bg-slate-800 rounded-xl transition">
+            <i class="fa-solid fa-chevron-up text-xs"></i>
+          </button>
+          <span class="text-[10px] font-bold text-slate-500 py-1 uppercase">CH</span>
+          <button onclick="sendRemoteCmd('CH_PREV')" class="w-full py-2.5 text-slate-300 active:text-white active:bg-slate-800 rounded-xl transition">
+            <i class="fa-solid fa-chevron-down text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Channels Screen on Mobile Remote -->
+    <div id="remote-body-channels" class="flex-1 overflow-y-auto p-3 hidden flex-col gap-2">
+      <div class="relative mb-1">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-500"></i>
+        <input id="remote-search-input" type="text" placeholder="Search Asianet, news, sports..." class="w-full bg-slate-900 text-slate-200 text-xs rounded-xl pl-8 pr-8 py-2 border border-slate-800 focus:outline-none focus:border-brand-500">
+        <button id="remote-search-clear" onclick="clearRemoteSearch()" class="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs hidden">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Remote Category Filter Pills -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+        <button onclick="setRemoteCategory('ALL')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-brand-600 text-white font-medium whitespace-nowrap" data-cat="ALL">All</button>
+        <button onclick="setRemoteCategory('IN')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="IN">India (Asianet)</button>
+        <button onclick="setRemoteCategory('News')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="News">News</button>
+        <button onclick="setRemoteCategory('Entertainment')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="Entertainment">Entertainment</button>
+        <button onclick="setRemoteCategory('Sports')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="Sports">Sports</button>
+      </div>
+
+      <div id="remote-channels-render" class="flex flex-col gap-1.5 divide-y divide-slate-800/60"></div>
+      <button id="remote-load-more" onclick="loadMoreRemoteChannels()" class="w-full py-2.5 mt-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded-xl font-medium border border-slate-800 hidden">
+        Load More Channels...
+      </button>
+    </div>
+
+    <!-- Favorites Screen on Mobile Remote -->
+    <div id="remote-body-favs" class="flex-1 overflow-y-auto p-3 hidden flex-col gap-2">
+      <div id="remote-favs-render" class="flex flex-col gap-1.5 divide-y divide-slate-800/60"></div>
+    </div>
+
+    <!-- EPG Schedule on Mobile Remote -->
+    <div id="remote-body-epg" class="flex-1 overflow-y-auto p-3 hidden flex-col gap-2">
+      <div id="remote-epg-render" class="flex flex-col gap-2"></div>
+    </div>
+
+    <!-- Mobile Remote Bottom Tabs -->
+    <nav class="h-16 bg-slate-900/95 border-t border-slate-800 flex items-center justify-around px-2 shrink-0">
+      <button id="rem-nav-pad" class="flex-1 py-1 text-brand-400 flex flex-col items-center gap-1 text-[10px] font-semibold">
+        <i class="fa-solid fa-gamepad text-base"></i>
+        <span>Remote</span>
+      </button>
+      <button id="rem-nav-channels" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+        <i class="fa-solid fa-tv text-base"></i>
+        <span>Channels</span>
+      </button>
+      <button id="rem-nav-favs" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+        <i class="fa-solid fa-star text-base"></i>
+        <span>Favorites</span>
+      </button>
+      <button id="rem-nav-epg" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+        <i class="fa-solid fa-calendar-days text-base"></i>
+        <span>Schedule</span>
+      </button>
+    </nav>
+  </div>
+
+  <script>
+    /**
+     * Deterministic Channel ID Generator to prevent TV and Remote Desync
+     */
+    function generateChannelId(name, url) {
+      const base = (url || name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return 'ch_' + (base.slice(-24) || Math.floor(Math.random() * 100000));
+    }
+
+    /**
+     * Built-in Channels featuring Asianet, National & Global High-Availability Streams
+     */
+    const DEFAULT_PRESET_CHANNELS = [
+      {
+        id: "asianet-news",
+        name: "Asianet News (Malayalam)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
+        group: "News",
+        country: "IN",
+        url: "https://asianetnews.vgcdn.net/asianet-news/tracks-v1a1/mono.m3u8",
+        program: "Asianet Varthakal & Prime Discussions"
+      },
+      {
+        id: "asianet-suvarna",
+        name: "Asianet Suvarna News (Kannada)",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Suvarna_News_Logo.png/512px-Suvarna_News_Logo.png",
+        group: "News",
+        country: "IN",
+        url: "https://asianetnews.vgcdn.net/vglive-sk-335835/playlist.m3u8",
+        program: "Suvarna Fast News & Karnataka Bulletins"
+      },
+      {
+        id: "asianet-me",
+        name: "Asianet Middle East",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
+        group: "Entertainment",
+        country: "IN",
+        url: "https://vidcdn.vidgyor.com/asianet-origin/liveabr/asianet-origin/live2/chunks.m3u8",
+        program: "Gulf Samayam & Prime Entertainment"
+      },
+      {
+        id: "asianet-live-2",
+        name: "Asianet News Live 24/7",
+        logo: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Asianet_News_logo.svg/512px-Asianet_News_logo.svg.png",
+        group: "News",
+        country: "IN",
+        url: "https://vidcdn.vidgyor.com/asianet-origin/liveabr/asianet-origin/live2/chunks.m3u8",
+        program: "Nonstop Live News Desk"
+      },
+      {
+        id: "ndtv-24x7",
+        name: "NDTV 24x7 HD",
+        logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/NDTV_logo.svg/512px-NDTV_logo.svg.png",
+        group: "News",
+        country: "IN",
+        url: "https://ndtv24x7elemarchana.akamaized.net/hls/live/2003678/ndtv24x7/master.m3u8",
+        program: "The World 24x7 & Left Right & Centre"
+      },
+      {
+        id: "india-today",
+        name: "India Today",
+        logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/India_Today_logo.svg/512px-India_Today_logo.svg.png",
+        group: "News",
+        country: "IN",
+        url: "https://feeds.intoday.in/hltapps/api/master.m3u8",
+        program: "News Today with Rajdeep Sardesai"
+      },
+      {
+        id: "wion-news",
+        name: "WION News Live",
+        logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/WION_logo.svg/512px-WION_logo.svg.png",
+        group: "News",
+        country: "IN",
+        url: "https://wionnews-live.akamaized.net/hls/live/2034033/wion/master.m3u8",
+        program: "Gravitas & Global Perspectives"
+      },
+      {
+        id: "nasa-tv",
+        name: "NASA TV HD",
+        logo: "https://images.nasa.gov/images/nasa_logo-large.ee51e220.png",
+        group: "Science",
+        country: "US",
+        url: "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8",
+        program: "ISS Live Stream & Artemis Mission Briefing"
+      },
+      {
+        id: "sky-news",
+        name: "Sky News Global",
+        logo: "https://news.sky.com/assets/sky-news-logo.png",
+        group: "News",
+        country: "UK",
+        url: "https://skynews-live.edgesuite.net/hls/live/2027209/skynews_live/master.m3u8",
+        program: "Sky News at Ten & Global World Desk"
+      },
+      {
+        id: "bloomberg-tv",
+        name: "Bloomberg Quicktake",
+        logo: "https://assets.bwbx.io/s3/javelin/public/hub/images/favicon-black-32x32.png",
+        group: "News",
+        country: "US",
+        url: "https://bloomberg-p2p.akamaized.net/hls/live/2003299/quicktake/master.m3u8",
+        program: "Markets Today & Global Economics"
+      },
+      {
+        id: "france24-en",
+        name: "France 24 English",
+        logo: "https://static.france24.com/meta_og_twcards/F24_TW.png",
+        group: "News",
+        country: "FR",
+        url: "https://static.france24.com/live/F24_EN_LO_HLS/live_tv.m3u8",
+        program: "Live International News & Perspectives"
+      },
+      {
+        id: "dw-english",
+        name: "DW English",
+        logo: "https://www.dw.com/manifest-icons/icon-192x192.png",
+        group: "News",
+        country: "DE",
+        url: "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8",
+        program: "DW News Live & Journal Report"
+      },
+      {
+        id: "al-jazeera-en",
+        name: "Al Jazeera English",
+        logo: "https://www.aljazeera.com/favicon_aje.ico",
+        group: "News",
+        country: "GLOBAL",
+        url: "https://live-hls-web-aje.getaj.net/AJE/01.m3u8",
+        program: "Newshour Worldwide & Documentaries"
+      },
+      {
+        id: "redbull-tv",
+        name: "Red Bull TV Live",
+        logo: "https://www.redbull.com/v3/resources/images/favicons/favicon-196x196.png",
+        group: "Sports",
+        country: "GLOBAL",
+        url: "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8",
+        program: "Extreme Action Sports & F1 Highlights"
+      },
+      {
+        id: "euronews-en",
+        name: "Euronews World",
+        logo: "https://www.euronews.com/favicon-192x192.png",
+        group: "News",
+        country: "GLOBAL",
+        url: "https://rakuten-euronews-1-gb.samsung.wurl.tv/playlist.m3u8",
+        program: "European Headline Edition"
+      }
+    ];
+
+    const state = {
+      channels: [...DEFAULT_PRESET_CHANNELS],
+      filteredChannels: [...DEFAULT_PRESET_CHANNELS],
+      currentChannelIndex: 0,
+      favorites: JSON.parse(localStorage.getItem('quantum_iptv_favs') || '[]'),
+      roomId: getOrGenerateRoomId(),
+      isTheaterFullscreen: false,
+      aspectIndex: 0,
+      aspectModes: ['object-contain', 'object-cover', 'object-fill'],
+      aspectLabels: ['16:9', 'Fill', 'Stretch'],
+      isRemoteClient: false,
+      remoteLimit: 60,
+      remoteActiveCategory: 'ALL'
+    };
+
+    function getOrGenerateRoomId() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('remote')) {
+        return urlParams.get('remote');
+      }
+      let stored = localStorage.getItem('quantum_iptv_room');
+      if (!stored) {
+        stored = 'ROOM-' + Math.floor(1000 + Math.random() * 9000);
+        localStorage.setItem('quantum_iptv_room', stored);
+      }
+      return stored;
+    }
+
+    // DOM Elements references
+    const video = document.getElementById('video-player');
+    const videoStage = document.getElementById('video-stage');
+    const videoSpinner = document.getElementById('video-spinner');
+    const spinnerMessage = document.getElementById('spinner-message');
+    const playerControls = document.getElementById('player-controls');
+    const exitTheaterBtn = document.getElementById('exit-theater-btn');
+    const engineHud = document.getElementById('engine-hud');
+    const btnPlayPause = document.getElementById('btn-play-pause');
+    const btnMute = document.getElementById('btn-mute');
+    const volSlider = document.getElementById('vol-slider');
+    const btnFullscreen = document.getElementById('btn-fullscreen');
+    const btnHeaderFullscreen = document.getElementById('btn-header-fullscreen');
+    const btnAspect = document.getElementById('btn-aspect');
+    const btnPip = document.getElementById('btn-pip');
+    const btnPrevChannel = document.getElementById('btn-prev-channel');
+    const btnNextChannel = document.getElementById('btn-next-channel');
+    const searchInput = document.getElementById('search-input');
+    const regionFilter = document.getElementById('region-filter');
+    const categoryFilter = document.getElementById('category-filter');
+    const viewChannels = document.getElementById('view-channels');
+    const viewEpg = document.getElementById('view-epg');
+    const viewFavorites = document.getElementById('view-favorites');
+    const favoritesListContainer = document.getElementById('favorites-list-container');
+    const favoritesEmptyMsg = document.getElementById('favorites-empty-msg');
+    const favCountBadge = document.getElementById('fav-count-badge');
+    const currentChName = document.getElementById('current-ch-name');
+    const currentChLogo = document.getElementById('current-ch-logo');
+    const currentChEpg = document.getElementById('current-ch-epg');
+    const unmuteBanner = document.getElementById('unmute-banner');
+
+    /**
+     * QuantumStream Adaptive Player Engine with Gap-Hopping & Autoplay Fallback
+     */
+    class QuantumStreamEngine {
+      constructor(videoElement) {
+        this.video = videoElement;
+        this.hls = null;
+        this.stallCount = 0;
+        this.lastCurrentTime = 0;
+        this.watchdogInterval = null;
+      }
+
+      initHls() {
+        if (state.isRemoteClient) return;
+
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+          this.hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            maxBufferSize: 60 * 1000 * 1000,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 8,
+            manifestLoadingTimeOut: 12000,
+            manifestLoadingMaxRetry: 3,
+            fragLoadingTimeOut: 15000,
+            fragLoadingMaxRetry: 4
+          });
+
+          this.hls.attachMedia(this.video);
+
+          this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            this.showSpinner(false);
+            this.attemptAutoplay();
+            this.updateHudResolution();
+          });
+
+          this.hls.on(Hls.Events.LEVEL_SWITCHED, () => {
+            this.updateHudResolution();
+          });
+
+          this.hls.on(Hls.Events.ERROR, (evt, data) => {
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  this.hls.startLoad();
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  this.hls.recoverMediaError();
+                  break;
+                default:
+                  this.fallbackToProxy();
+                  break;
+              }
+            }
+          });
+        }
+        this.startWatchdog();
+      }
+
+      attemptAutoplay() {
+        if (!this.video || state.isRemoteClient) return;
+        const playPromise = this.video.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            if (unmuteBanner) unmuteBanner.classList.add('hidden');
+            updatePlayPauseIcons();
+            broadcastTVState();
+          }).catch(() => {
+            // Autoplay with audio was blocked by browser. Mute and play instantly!
+            this.video.muted = true;
+            if (btnMute) btnMute.innerHTML = '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>';
+            this.video.play().then(() => {
+              if (unmuteBanner) unmuteBanner.classList.remove('hidden');
+            }).catch(() => {});
+            updatePlayPauseIcons();
+            broadcastTVState();
+          });
+        }
+      }
+
+      load(url) {
+        if (state.isRemoteClient) return;
+        this.showSpinner(true, "Buffering Stream...");
+        this.stallCount = 0;
+
+        if (this.hls && Hls.isSupported()) {
+          this.hls.loadSource(url);
+        } else if (this.video && this.video.canPlayType('application/vnd.apple.mpegurl')) {
+          this.video.src = url;
+          this.video.addEventListener('loadedmetadata', () => {
+            this.showSpinner(false);
+            this.attemptAutoplay();
+          }, { once: true });
+        } else if (this.video) {
+          this.video.src = url;
+          this.attemptAutoplay();
+        }
+      }
+
+      fallbackToProxy() {
+        const curCh = state.filteredChannels[state.currentChannelIndex];
+        if (!curCh) return;
+        if (!curCh.url.includes('corsproxy.io')) {
+          const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
+          if (this.hls) this.hls.loadSource(proxiedUrl);
+        }
+      }
+
+      showSpinner(show, message = "Loading...") {
+        if (!videoSpinner) return;
+        if (show) {
+          if (spinnerMessage) spinnerMessage.textContent = message;
+          videoSpinner.classList.remove('hidden');
+          requestAnimationFrame(() => videoSpinner.classList.remove('opacity-0'));
+        } else {
+          videoSpinner.classList.add('opacity-0');
+          setTimeout(() => videoSpinner.classList.add('hidden'), 250);
+        }
+      }
+
+      startWatchdog() {
+        if (state.isRemoteClient) return;
+        if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+        this.watchdogInterval = setInterval(() => {
+          this.monitorBufferAndHealth();
+        }, 1000);
+      }
+
+      monitorBufferAndHealth() {
+        if (!this.video || state.isRemoteClient) return;
+
+        let bufferedAhead = 0;
+        const current = this.video.currentTime;
+
+        for (let i = 0; i < this.video.buffered.length; i++) {
+          if (this.video.buffered.start(i) <= current && current <= this.video.buffered.end(i)) {
+            bufferedAhead = this.video.buffered.end(i) - current;
+            break;
+          }
+        }
+
+        const hudBuffer = document.getElementById('hud-buffer');
+        const hudBufferBar = document.getElementById('hud-buffer-bar');
+        const hudHealth = document.getElementById('hud-health');
+
+        if (hudBuffer) hudBuffer.textContent = `${bufferedAhead.toFixed(1)}s`;
+        if (hudBufferBar) hudBufferBar.style.width = `${Math.min(100, (bufferedAhead / 25) * 100)}%`;
+
+        if (!this.video.paused && !this.video.seeking) {
+          if (Math.abs(this.video.currentTime - this.lastCurrentTime) < 0.05 && bufferedAhead > 0.3) {
+            this.stallCount++;
+            if (this.stallCount >= 2) {
+              this.video.currentTime += 0.25;
+              this.stallCount = 0;
+              if (hudHealth) hudHealth.textContent = "Hopped Gap";
+            }
+          } else {
+            this.stallCount = 0;
+            if (hudHealth) hudHealth.textContent = "Optimal";
+          }
+        }
+        this.lastCurrentTime = this.video.currentTime;
+      }
+
+      updateHudResolution() {
+        const hudRes = document.getElementById('hud-res');
+        if (!hudRes || !this.video) return;
+        if (this.video.videoWidth) {
+          hudRes.textContent = `${this.video.videoHeight}p`;
+        }
+      }
+    }
+
+    const engine = new QuantumStreamEngine(video);
+
+    function unmuteAudioNow() {
+      if (video) {
+        video.muted = false;
+        if (btnMute) btnMute.innerHTML = '<i class="fa-solid fa-volume-high text-xs"></i>';
+      }
+      if (unmuteBanner) unmuteBanner.classList.add('hidden');
+      broadcastTVState();
+    }
+
+    let controlsIdleTimer = null;
+    const CONTROLS_HIDE_DELAY = 2500;
+
+    function isFullscreenActive() {
+      return state.isTheaterFullscreen || !!document.fullscreenElement;
+    }
+
+    function wakeControls() {
+      if (!videoStage || state.isRemoteClient) return;
+      videoStage.classList.remove('fullscreen-idle');
+
+      if (controlsIdleTimer) {
+        clearTimeout(controlsIdleTimer);
+        controlsIdleTimer = null;
+      }
+
+      if (isFullscreenActive() && video && !video.paused) {
+        controlsIdleTimer = setTimeout(() => {
+          if (isFullscreenActive() && video && !video.paused) {
+            videoStage.classList.add('fullscreen-idle');
+          }
+        }, CONTROLS_HIDE_DELAY);
+      }
+    }
+
+    function toggleFullscreenMode(forceState) {
+      const shouldBeFull = forceState !== undefined ? forceState : !state.isTheaterFullscreen;
+      state.isTheaterFullscreen = shouldBeFull;
+
+      if (!videoStage) return;
+
+      if (shouldBeFull) {
+        videoStage.classList.add('theater-fullscreen');
+        if (exitTheaterBtn) exitTheaterBtn.classList.remove('hidden');
+        try {
+          if (!document.fullscreenElement && videoStage.requestFullscreen) {
+            videoStage.requestFullscreen().catch(() => {});
+          }
+        } catch (e) {}
+        wakeControls();
+      } else {
+        videoStage.classList.remove('theater-fullscreen');
+        videoStage.classList.remove('fullscreen-idle');
+        if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
+        if (exitTheaterBtn) exitTheaterBtn.classList.add('hidden');
+        try {
+          if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          }
+        } catch (e) {}
+      }
+      broadcastTVState();
+    }
+
+    function playChannel(index) {
+      if (state.isRemoteClient) return;
+      if (index < 0 || index >= state.filteredChannels.length) return;
+      state.currentChannelIndex = index;
+      const channel = state.filteredChannels[index];
+      if (!channel) return;
+
+      if (currentChName) currentChName.textContent = channel.name;
+      if (currentChLogo) currentChLogo.src = channel.logo || '';
+      if (currentChEpg) currentChEpg.textContent = channel.program || "Live Stream";
+
+      engine.load(channel.url);
+      renderChannelList();
+      broadcastTVState();
+    }
+
+    /**
+     * Cross-device resilient channel tuning by ID, URL, or Name with auto-registration
+     */
+    function tuneToChannel(target) {
+      if (!target || state.isRemoteClient) return;
+
+      let idx = state.channels.findIndex(ch => 
+        (target.id && ch.id === target.id) || 
+        (target.url && ch.url === target.url) || 
+        (target.name && ch.name.toLowerCase() === target.name.toLowerCase())
+      );
+
+      // If channel not yet registered in TV catalog, add it dynamically!
+      if (idx === -1 && target.url) {
+        const newCh = {
+          id: target.id || generateChannelId(target.name, target.url),
+          name: target.name || 'Stream Channel',
+          url: target.url,
+          logo: target.logo || '',
+          group: target.group || 'Live',
+          country: target.country || 'TV',
+          program: target.program || 'Live Satellite Broadcast'
+        };
+        state.channels.push(newCh);
+        state.filteredChannels = [...state.channels];
+        idx = state.channels.length - 1;
+      }
+
+      if (idx !== -1) {
+        state.filteredChannels = [...state.channels];
+        playChannel(idx);
+      }
+    }
+
+    function togglePlayPause() {
+      if (!video || state.isRemoteClient) return;
+      if (video.paused) {
+        video.play().catch(() => {});
+        wakeControls();
+      } else {
+        video.pause();
+        if (videoStage) videoStage.classList.remove('fullscreen-idle');
+        if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
+      }
+      updatePlayPauseIcons();
+    }
+
+    function updatePlayPauseIcons() {
+      const isPaused = video ? video.paused : true;
+      if (btnPlayPause) {
+        btnPlayPause.innerHTML = isPaused ? '<i class="fa-solid fa-play ml-0.5 text-xs"></i>' : '<i class="fa-solid fa-pause text-xs"></i>';
+      }
+      broadcastTVState();
+    }
+
+    function toggleFavorite(channelId, evt) {
+      if (evt) evt.stopPropagation();
+      const idx = state.favorites.indexOf(channelId);
+      if (idx > -1) {
+        state.favorites.splice(idx, 1);
+      } else {
+        state.favorites.push(channelId);
+      }
+      localStorage.setItem('quantum_iptv_favs', JSON.stringify(state.favorites));
+      updateFavoritesUI();
+      renderChannelList();
+      broadcastTVState();
+    }
+
+    function updateFavoritesUI() {
+      if (favCountBadge) favCountBadge.textContent = state.favorites.length;
+      if (!favoritesListContainer) return;
+
+      const favChannels = state.channels.filter(ch => state.favorites.includes(ch.id));
+      if (favChannels.length === 0) {
+        if (favoritesEmptyMsg) favoritesEmptyMsg.classList.remove('hidden');
+        favoritesListContainer.innerHTML = '';
+      } else {
+        if (favoritesEmptyMsg) favoritesEmptyMsg.classList.add('hidden');
+        favoritesListContainer.innerHTML = favChannels.map(ch => `
+          <div onclick="tuneToChannel({ id: '${ch.id}', url: '${ch.url}', name: '${ch.name}' })" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition">
+            <div class="flex items-center gap-2.5 overflow-hidden">
+              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-6 h-6 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <div class="overflow-hidden">
+                <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
+                <div class="text-[10px] text-slate-400 truncate">${ch.group || 'Live'}</div>
+              </div>
+            </div>
+            <button onclick="toggleFavorite('${ch.id}', event)" class="text-amber-400 p-1 text-xs hover:scale-110 transition">
+              <i class="fa-solid fa-star"></i>
+            </button>
+          </div>
+        `).join('');
+      }
+    }
+
+    function filterChannels() {
+      const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+      const region = regionFilter ? regionFilter.value : 'ALL';
+      const category = categoryFilter ? categoryFilter.value : 'ALL';
+
+      state.filteredChannels = state.channels.filter(ch => {
+        const matchesQuery = !query || 
+          (ch.name && ch.name.toLowerCase().includes(query)) || 
+          (ch.group && ch.group.toLowerCase().includes(query)) ||
+          (ch.program && ch.program.toLowerCase().includes(query)) ||
+          (ch.country && ch.country.toLowerCase().includes(query));
+
+        const matchesRegion = region === 'ALL' || (ch.country && ch.country.toUpperCase() === region);
+        const matchesCategory = category === 'ALL' || (ch.group && ch.group.toLowerCase().includes(category.toLowerCase()));
+
+        return matchesQuery && matchesRegion && matchesCategory;
+      });
+
+      renderChannelList();
+    }
+
+    function renderChannelList() {
+      if (!viewChannels) return;
+
+      if (state.filteredChannels.length === 0) {
+        viewChannels.innerHTML = `
+          <div class="p-6 text-center text-xs text-slate-500">
+            <i class="fa-solid fa-tv text-xl mb-2 text-slate-600 block"></i>
+            No channels found matching query.<br>
+            <span class="text-[10px] text-slate-400">Try searching "Asianet" or clear filters.</span>
+          </div>`;
+        return;
+      }
+
+      const displayChannels = state.filteredChannels.slice(0, 100);
+
+      viewChannels.innerHTML = displayChannels.map((ch, idx) => {
+        const isActive = idx === state.currentChannelIndex;
+        const isFav = state.favorites.includes(ch.id);
+
+        return `
+          <div onclick="playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${isActive ? 'bg-brand-950/60 border-l-4 border-brand-500 pl-2' : ''}">
+            <div class="flex items-center gap-2.5 overflow-hidden">
+              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-7 h-7 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <div class="overflow-hidden">
+                <div class="text-xs font-semibold ${isActive ? 'text-brand-400' : 'text-slate-200'} truncate flex items-center gap-1.5">
+                  <span>${ch.name}</span>
+                  ${isActive ? '<span class="w-1.5 h-1.5 rounded-full bg-brand-400 animate-ping"></span>' : ''}
+                </div>
+                <div class="text-[10px] text-slate-400 truncate flex items-center gap-1.5">
+                  <span class="px-1 py-0.2 rounded bg-slate-800 text-[9px] text-slate-400 font-mono">${ch.country || 'TV'}</span>
+                  <span>${ch.program || 'Live broadcast'}</span>
+                </div>
+              </div>
+            </div>
+            <button onclick="toggleFavorite('${ch.id}', event)" class="p-1.5 text-xs ${isFav ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'} transition hover:scale-110">
+              <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function generateSyntheticEpg() {
+      const epgTimelineList = document.getElementById('epg-timeline-list');
+      const epgCurrentTime = document.getElementById('epg-current-time');
+      if (!epgTimelineList) return;
+
+      const now = new Date();
+      if (epgCurrentTime) {
+        epgCurrentTime.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      const timeSlots = [
+        { offset: -30, label: "Started 30m ago", tag: "Concluded Soon" },
+        { offset: 0, label: "NOW PLAYING", tag: "LIVE" },
+        { offset: 45, label: "Up Next (45m)", tag: "Scheduled" },
+        { offset: 120, label: "Evening Prime Time", tag: "Prime" }
+      ];
+
+      const activeCh = state.filteredChannels[state.currentChannelIndex] || state.channels[0];
+
+      epgTimelineList.innerHTML = timeSlots.map((slot, i) => {
+        const slotDate = new Date(now.getTime() + slot.offset * 60000);
+        const timeStr = slotDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const isCurrent = slot.offset === 0;
+
+        return `
+          <div class="p-2.5 rounded-xl border ${isCurrent ? 'bg-brand-950/40 border-brand-500/40' : 'bg-slate-950/40 border-slate-800/80'} flex flex-col gap-1">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="font-mono text-slate-400">${timeStr}</span>
+              <span class="px-1.5 py-0.5 rounded font-bold uppercase tracking-wider text-[9px] ${isCurrent ? 'bg-brand-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400'}">${slot.tag}</span>
+            </div>
+            <div class="text-xs font-semibold ${isCurrent ? 'text-brand-300 font-bold' : 'text-slate-200'}">
+              ${isCurrent ? (activeCh.program || 'Live Broadcast Edition') : `Special Program Feature Part ${i + 1}`}
+            </div>
+            <div class="text-[10px] text-slate-400 line-clamp-1">
+              High definition satellite broadcast covering regional breaking developments and prime panel coverage.
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadM3uPlaylist(url, isBackground = false) {
+      if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, "Fetching M3U Playlist...");
+      try {
+        let content = "";
+        try {
+          const resp = await fetch(url, { headers: { 'Accept': '*/*' } });
+          if (resp.ok) content = await resp.text();
+        } catch (e) {}
+
+        if (!content || !content.includes('#EXTM3U')) {
+          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          const proxyResp = await fetch(proxyUrl);
+          if (proxyResp.ok) content = await proxyResp.text();
+        }
+
+        if (!content || !content.includes('#EXTINF')) {
+          throw new Error('Invalid M3U playlist format');
+        }
+
+        const parsedChannels = parseM3U(content);
+        if (parsedChannels.length > 0) {
+          const existingUrls = new Set(state.channels.map(c => c.url));
+          const newChannels = parsedChannels.filter(c => !existingUrls.has(c.url));
+          state.channels = [...state.channels, ...newChannels];
+          
+          filterChannels();
+
+          const countBadge = document.getElementById('badge-channels-count');
+          if (countBadge) countBadge.textContent = `${state.channels.length} Channels Active`;
+          
+          if (!isBackground && !state.isRemoteClient) {
+            playChannel(0);
+            closeModals();
+          }
+
+          if (state.isRemoteClient) {
+            renderRemoteChannelsList();
+            renderRemoteFavsList();
+          }
+        }
+      } catch (err) {
+        if (!isBackground && !state.isRemoteClient) engine.showSpinner(false);
+      }
+    }
+
+    function parseM3U(m3uText) {
+      const lines = m3uText.split(/\r?\n/);
+      const results = [];
+      let currentInfo = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('#EXTINF:')) {
+          currentInfo = {};
+          const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
+          if (logoMatch) currentInfo.logo = logoMatch[1];
+
+          const countryMatch = line.match(/tvg-country="([^"]+)"/i);
+          if (countryMatch) currentInfo.country = countryMatch[1].toUpperCase();
+
+          const groupMatch = line.match(/group-title="([^"]+)"/i);
+          if (groupMatch) currentInfo.group = groupMatch[1];
+
+          const commaIdx = line.lastIndexOf(',');
+          if (commaIdx !== -1) {
+            currentInfo.name = line.substring(commaIdx + 1).trim();
+          } else {
+            currentInfo.name = "Live Stream " + (results.length + 1);
+          }
+        } else if (line.startsWith('http://') || line.startsWith('https://')) {
+          if (currentInfo) {
+            currentInfo.url = line;
+            currentInfo.id = generateChannelId(currentInfo.name, currentInfo.url);
+            currentInfo.program = currentInfo.group ? `${currentInfo.group} Live Stream` : "Broadcast Program";
+            results.push(currentInfo);
+            currentInfo = null;
+          }
+          if (results.length >= 2500) break;
+        }
+      }
+      return results;
+    }
+
+    function setM3uUrl(url) {
+      const input = document.getElementById('input-m3u-url');
+      if (input) input.value = url;
+    }
+
+    let mqttClient = null;
+    const broadcastChan = window.BroadcastChannel ? new BroadcastChannel(`quantum_iptv_${state.roomId}`) : null;
+
+    function initRemoteSync() {
+      if (broadcastChan) {
+        broadcastChan.onmessage = (event) => {
+          if (!event.data) return;
+          if (state.isRemoteClient) {
+            if (event.data.action === 'SYNC_STATE') updateRemoteStateView(event.data.payload);
+          } else {
+            handleIncomingRemoteCommand(event.data);
+          }
+        };
+      }
+
+      try {
+        if (typeof mqtt !== 'undefined') {
+          const clientId = (state.isRemoteClient ? 'remote_' : 'tv_') + Math.random().toString(16).substr(2, 8);
+          mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+            clientId,
+            clean: true,
+            connectTimeout: 6000,
+            reconnectPeriod: 2500
+          });
+
+          mqttClient.on('connect', () => {
+            const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
+            const stateTopic = `quantum_tv/${state.roomId}/state`;
+
+            if (state.isRemoteClient) {
+              mqttClient.subscribe(stateTopic);
+              const statEl = document.getElementById('remote-conn-status');
+              if (statEl) statEl.textContent = 'Connected to TV';
+              sendRemoteCmd('REQUEST_SYNC');
+            } else {
+              mqttClient.subscribe(cmdTopic);
+              broadcastTVState();
+            }
+          });
+
+          mqttClient.on('message', (topic, payload) => {
+            try {
+              const data = JSON.parse(payload.toString());
+              if (state.isRemoteClient) {
+                if (topic.endsWith('/state')) updateRemoteStateView(data);
+              } else {
+                if (topic.endsWith('/cmd')) handleIncomingRemoteCommand(data);
+              }
+            } catch (e) {}
+          });
+        }
+      } catch (e) {}
+    }
+
+    function sendRemoteCmd(action, payload = {}) {
+      if (navigator.vibrate) {
+        try { navigator.vibrate(35); } catch(e) {}
+      }
+      const cmd = { action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
+
+      if (broadcastChan) broadcastChan.postMessage(cmd);
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(`quantum_tv/${state.roomId}/cmd`, JSON.stringify(cmd));
+      }
+    }
+
+    function broadcastTVState() {
+      if (state.isRemoteClient) return;
+
+      const curCh = state.filteredChannels[state.currentChannelIndex] || state.channels[0];
+      const tvState = {
+        roomId: state.roomId,
+        channelId: curCh ? curCh.id : "",
+        channelName: curCh ? curCh.name : "Asianet News",
+        channelLogo: curCh ? curCh.logo : "",
+        channelUrl: curCh ? curCh.url : "",
+        program: curCh ? curCh.program : "Live Broadcast",
+        isPlaying: video ? !video.paused : false,
+        isMuted: video ? video.muted : false,
+        volume: video ? video.volume : 1,
+        isFullscreen: state.isTheaterFullscreen,
+        favorites: state.favorites
+      };
+
+      if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_STATE', payload: tvState });
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(`quantum_tv/${state.roomId}/state`, JSON.stringify(tvState));
+      }
+    }
+
+    function handleIncomingRemoteCommand(msg) {
+      if (!msg || !msg.action || state.isRemoteClient) return;
+
+      switch (msg.action) {
+        case 'REQUEST_SYNC':
+          broadcastTVState();
+          break;
+        case 'PLAY_PAUSE':
+        case 'OK':
+          togglePlayPause();
+          break;
+        case 'CH_NEXT':
+          if (state.currentChannelIndex < state.filteredChannels.length - 1) {
+            playChannel(state.currentChannelIndex + 1);
+          } else {
+            playChannel(0);
+          }
+          break;
+        case 'CH_PREV':
+          if (state.currentChannelIndex > 0) {
+            playChannel(state.currentChannelIndex - 1);
+          } else {
+            playChannel(state.filteredChannels.length - 1);
+          }
+          break;
+        case 'VOL_UP':
+          if (video) {
+            video.volume = Math.min(1, video.volume + 0.1);
+            if (volSlider) volSlider.value = video.volume;
+            video.muted = false;
+            broadcastTVState();
+          }
+          break;
+        case 'VOL_DOWN':
+          if (video) {
+            video.volume = Math.max(0, video.volume - 0.1);
+            if (volSlider) volSlider.value = video.volume;
+            broadcastTVState();
+          }
+          break;
+        case 'MUTE':
+          if (video) {
+            video.muted = !video.muted;
+            broadcastTVState();
+          }
+          break;
+        case 'FULLSCREEN':
+          toggleFullscreenMode();
+          break;
+        case 'TUNE_CHANNEL':
+          if (msg.payload) {
+            tuneToChannel(msg.payload);
+          }
+          break;
+        case 'SET_FAVORITES':
+          if (msg.payload && Array.isArray(msg.payload.favorites)) {
+            state.favorites = msg.payload.favorites;
+            localStorage.setItem('quantum_iptv_favs', JSON.stringify(state.favorites));
+            updateFavoritesUI();
+            renderChannelList();
+            broadcastTVState();
+          }
+          break;
+      }
+    }
+
+    function updateRemoteStateView(data) {
+      if (!data) return;
+      const remName = document.getElementById('remote-now-channel');
+      const remProg = document.getElementById('remote-now-prog');
+      const remLogo = document.getElementById('remote-now-logo');
+      const remFav = document.getElementById('remote-now-fav-btn');
+
+      if (remName && data.channelName) {
+        remName.textContent = data.channelName;
+        remName.setAttribute('data-id', data.channelId || '');
+        remName.setAttribute('data-url', data.channelUrl || '');
+      }
+      if (remProg && data.program) remProg.textContent = data.program;
+      if (remLogo && data.channelLogo) remLogo.src = data.channelLogo;
+      
+      if (data.favorites && Array.isArray(data.favorites)) {
+        state.favorites = data.favorites;
+        localStorage.setItem('quantum_iptv_favs', JSON.stringify(state.favorites));
+      }
+
+      if (remFav && data.channelId) {
+        const isFav = state.favorites.includes(data.channelId);
+        remFav.innerHTML = isFav ? '<i class="fa-solid fa-star text-amber-400"></i>' : '<i class="fa-regular fa-star"></i>';
+      }
+    }
+
+    function toggleCurrentPlayingFav() {
+      const remName = document.getElementById('remote-now-channel');
+      if (!remName) return;
+      const chId = remName.getAttribute('data-id');
+      if (chId) {
+        toggleRemoteFav(chId);
+      }
+    }
+
+    function toggleRemoteFav(channelId, evt) {
+      if (evt) {
+        evt.stopPropagation();
+        evt.preventDefault();
+      }
+      const idx = state.favorites.indexOf(channelId);
+      if (idx > -1) {
+        state.favorites.splice(idx, 1);
+      } else {
+        state.favorites.push(channelId);
+      }
+      localStorage.setItem('quantum_iptv_favs', JSON.stringify(state.favorites));
+
+      // Broadcast new favorites array to the TV immediately
+      sendRemoteCmd('SET_FAVORITES', { favorites: state.favorites });
+
+      renderRemoteChannelsList();
+      renderRemoteFavsList();
+
+      const curChId = document.getElementById('remote-now-channel')?.getAttribute('data-id');
+      const remFav = document.getElementById('remote-now-fav-btn');
+      if (remFav && curChId) {
+        const isFav = state.favorites.includes(curChId);
+        remFav.innerHTML = isFav ? '<i class="fa-solid fa-star text-amber-400"></i>' : '<i class="fa-regular fa-star"></i>';
+      }
+    }
+
+    function setRemoteCategory(cat) {
+      state.remoteActiveCategory = cat;
+      document.querySelectorAll('.rem-cat-btn').forEach(btn => {
+        if (btn.getAttribute('data-cat') === cat) {
+          btn.className = 'rem-cat-btn px-2.5 py-1 rounded-full bg-brand-600 text-white font-medium whitespace-nowrap';
+        } else {
+          btn.className = 'rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800';
+        }
+      });
+      state.remoteLimit = 60;
+      renderRemoteChannelsList();
+    }
+
+    function clearRemoteSearch() {
+      const searchInput = document.getElementById('remote-search-input');
+      const clearBtn = document.getElementById('remote-search-clear');
+      if (searchInput) {
+        searchInput.value = '';
+        if (clearBtn) clearBtn.classList.add('hidden');
+        renderRemoteChannelsList();
+      }
+    }
+
+    function loadMoreRemoteChannels() {
+      state.remoteLimit += 60;
+      renderRemoteChannelsList();
+    }
+
+    function renderRemoteChannelsList() {
+      const container = document.getElementById('remote-channels-render');
+      const loadMoreBtn = document.getElementById('remote-load-more');
+      if (!container) return;
+
+      const searchInput = document.getElementById('remote-search-input');
+      const clearBtn = document.getElementById('remote-search-clear');
+      const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+      const cat = state.remoteActiveCategory || 'ALL';
+
+      if (clearBtn) {
+        clearBtn.classList.toggle('hidden', query.length === 0);
+      }
+
+      const list = state.channels.filter(ch => {
+        const matchesSearch = !query || 
+          (ch.name && ch.name.toLowerCase().includes(query)) || 
+          (ch.country && ch.country.toLowerCase().includes(query)) || 
+          (ch.group && ch.group.toLowerCase().includes(query)) ||
+          (ch.program && ch.program.toLowerCase().includes(query));
+
+        const matchesCat = cat === 'ALL' ||
+          (cat === 'IN' && (ch.country === 'IN' || (ch.name && /asianet|india|malayalam|kannada|hindi|tamil/i.test(ch.name)))) ||
+          (ch.group && ch.group.toLowerCase().includes(cat.toLowerCase()));
+
+        return matchesSearch && matchesCat;
+      });
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+            <i class="fa-solid fa-tv text-2xl text-slate-600"></i>
+            <span>No channels found matching "${query}".</span>
+            <span class="text-[10px] text-slate-600">Try checking your spelling or selecting 'All'.</span>
+          </div>`;
+        if (loadMoreBtn) loadMoreBtn.classList.add('hidden');
+        return;
+      }
+
+      const sliceLimit = state.remoteLimit || 60;
+      const displayChannels = list.slice(0, sliceLimit);
+
+      container.innerHTML = displayChannels.map(ch => {
+        const isFav = state.favorites.includes(ch.id);
+        const safeName = (ch.name || 'Stream Channel').replace(/'/g, "\\'");
+        const safeUrl = (ch.url || '').replace(/'/g, "\\'");
+        const safeLogo = (ch.logo || '').replace(/'/g, "\\'");
+        const safeProg = (ch.program || 'Live Broadcast').replace(/'/g, "\\'");
+
+        return `
+          <div onclick="sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition">
+            <div class="flex items-center gap-3 overflow-hidden">
+              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <div class="text-left overflow-hidden">
+                <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
+                <div class="text-[10px] text-slate-400">${ch.country || 'TV'} · ${ch.group || 'Live Stream'}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button onclick="toggleRemoteFav('${ch.id}', event)" class="p-2 text-sm ${isFav ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'} active:scale-125 transition">
+                <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+              </button>
+              <div class="w-7 h-7 rounded-lg bg-brand-600/20 text-brand-400 flex items-center justify-center">
+                <i class="fa-solid fa-play text-[10px]"></i>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      if (loadMoreBtn) {
+        loadMoreBtn.classList.toggle('hidden', list.length <= sliceLimit);
+      }
+    }
+
+    function renderRemoteFavsList() {
+      const container = document.getElementById('remote-favs-render');
+      if (!container) return;
+      const favs = state.channels.filter(ch => state.favorites.includes(ch.id));
+      if (favs.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+            <i class="fa-regular fa-star text-2xl text-slate-600"></i>
+            <span>No favorite channels starred yet.</span>
+            <span class="text-[10px] text-slate-600">Tap the star on any channel to pin it here.</span>
+          </div>`;
+        return;
+      }
+      container.innerHTML = favs.map(ch => {
+        const safeName = (ch.name || 'Stream Channel').replace(/'/g, "\\'");
+        const safeUrl = (ch.url || '').replace(/'/g, "\\'");
+        const safeLogo = (ch.logo || '').replace(/'/g, "\\'");
+        const safeProg = (ch.program || 'Live Broadcast').replace(/'/g, "\\'");
+
+        return `
+          <div onclick="sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition">
+            <div class="flex items-center gap-3 overflow-hidden">
+              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <div class="text-left overflow-hidden">
+                <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
+                <div class="text-[10px] text-slate-400">${ch.group || 'Live Stream'}</div>
+              </div>
+            </div>
+            <button onclick="toggleRemoteFav('${ch.id}', event)" class="p-2 text-sm text-amber-400 active:scale-125 transition">
+              <i class="fa-solid fa-star"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderRemoteEpgList() {
+      const container = document.getElementById('remote-epg-render');
+      if (!container) return;
+      const curName = document.getElementById('remote-now-channel')?.textContent || 'Asianet News';
+      const curProg = document.getElementById('remote-now-prog')?.textContent || 'Live Broadcast';
+
+      container.innerHTML = `
+        <div class="p-3 bg-slate-900 border border-brand-500/30 rounded-xl">
+          <span class="text-[9px] uppercase font-bold px-1.5 py-0.5 bg-brand-500 rounded text-white inline-block mb-1">Live Now on TV</span>
+          <h4 class="text-xs font-bold text-white">${curName} - ${curProg}</h4>
+          <p class="text-[10px] text-slate-400 mt-0.5">High-definition satellite broadcast with real-time audio/video sync.</p>
+        </div>
+        <div class="p-3 bg-slate-900 border border-slate-800 rounded-xl">
+          <span class="text-[9px] uppercase font-bold px-1.5 py-0.5 bg-slate-800 rounded text-slate-400 inline-block mb-1">In 45 Minutes</span>
+          <h4 class="text-xs font-bold text-slate-200">Prime News & Studio Debate</h4>
+          <p class="text-[10px] text-slate-500 mt-0.5">Comprehensive regional headlines and evening analysis.</p>
+        </div>
+      `;
+    }
+
+    function setupRemoteModal() {
+      const roomLabel = document.getElementById('remote-room-id');
+      if (roomLabel) roomLabel.textContent = state.roomId;
+
+      const remoteUrl = `${window.location.origin}${window.location.pathname}?remote=${state.roomId}`;
+      const testBtn = document.getElementById('btn-test-remote');
+      if (testBtn) testBtn.href = remoteUrl;
+
+      const qrContainer = document.getElementById('qrcode-container');
+      if (qrContainer) {
+        qrContainer.innerHTML = "";
+        try {
+          if (typeof QRCode !== 'undefined') {
+            new QRCode(qrContainer, {
+              text: remoteUrl,
+              width: 170,
+              height: 170,
+              colorDark: "#0f172a",
+              colorLight: "#ffffff",
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          } else {
+            qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=${encodeURIComponent(remoteUrl)}" alt="QR Code" class="rounded">`;
+          }
+        } catch (e) {
+          qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=${encodeURIComponent(remoteUrl)}" alt="QR Code" class="rounded">`;
+        }
+      }
+    }
+
+    function checkAndLaunchRemoteView() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('remote')) {
+        state.isRemoteClient = true;
+
+        // Strip TV media player on the remote client to ensure 100% silence
+        if (video) {
+          video.pause();
+          video.muted = true;
+          video.src = "";
+          video.removeAttribute('src');
+          video.load();
+        }
+
+        const vStage = document.getElementById('video-stage');
+        if (vStage) vStage.style.display = 'none';
+        const tvHead = document.getElementById('tv-header');
+        if (tvHead) tvHead.style.display = 'none';
+        const sidebar = document.getElementById('channel-sidebar');
+        if (sidebar) sidebar.style.display = 'none';
+
+        const remoteApp = document.getElementById('mobile-remote-app');
+        if (remoteApp) remoteApp.classList.remove('hidden');
+
+        const roomTag = document.getElementById('remote-room-tag');
+        if (roomTag) roomTag.textContent = state.roomId;
+
+        const navPad = document.getElementById('rem-nav-pad');
+        const navChannels = document.getElementById('rem-nav-channels');
+        const navFavs = document.getElementById('rem-nav-favs');
+        const navEpg = document.getElementById('rem-nav-epg');
+
+        const bodyPad = document.getElementById('remote-body-pad');
+        const bodyChannels = document.getElementById('remote-body-channels');
+        const bodyFavs = document.getElementById('remote-body-favs');
+        const bodyEpg = document.getElementById('remote-body-epg');
+
+        function switchRemoteTab(tab) {
+          if (bodyPad) bodyPad.classList.toggle('hidden', tab !== 'pad');
+          if (bodyChannels) bodyChannels.classList.toggle('hidden', tab !== 'channels');
+          if (bodyFavs) bodyFavs.classList.toggle('hidden', tab !== 'favs');
+          if (bodyEpg) bodyEpg.classList.toggle('hidden', tab !== 'epg');
+
+          [navPad, navChannels, navFavs, navEpg].forEach(b => {
+            if (b) {
+              b.classList.remove('text-brand-400');
+              b.classList.add('text-slate-400');
+            }
+          });
+
+          if (tab === 'pad' && navPad) navPad.classList.add('text-brand-400');
+          if (tab === 'channels' && navChannels) {
+            navChannels.classList.add('text-brand-400');
+            renderRemoteChannelsList();
+          }
+          if (tab === 'favs' && navFavs) {
+            navFavs.classList.add('text-brand-400');
+            renderRemoteFavsList();
+          }
+          if (tab === 'epg' && navEpg) {
+            navEpg.classList.add('text-brand-400');
+            renderRemoteEpgList();
+          }
+        }
+
+        if (navPad) navPad.addEventListener('click', () => switchRemoteTab('pad'));
+        if (navChannels) navChannels.addEventListener('click', () => switchRemoteTab('channels'));
+        if (navFavs) navFavs.addEventListener('click', () => switchRemoteTab('favs'));
+        if (navEpg) navEpg.addEventListener('click', () => switchRemoteTab('epg'));
+
+        const remSearch = document.getElementById('remote-search-input');
+        let remSearchTimer = null;
+        if (remSearch) {
+          remSearch.addEventListener('input', () => {
+            clearTimeout(remSearchTimer);
+            remSearchTimer = setTimeout(() => {
+              state.remoteLimit = 60;
+              renderRemoteChannelsList();
+            }, 150);
+          });
+        }
+      }
+    }
+
+    function setupEventListeners() {
+      // Robust prevention of double-tap and gesture zoom
+      let lastTouchEnd = 0;
+      document.addEventListener('touchend', (e) => {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 350) {
+          e.preventDefault();
+        }
+        lastTouchEnd = now;
+      }, { passive: false });
+
+      document.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      ['gesturestart', 'gesturechange', 'gestureend'].forEach(evt => {
+        document.addEventListener(evt, (e) => e.preventDefault());
+      });
+
+      if (video && !state.isRemoteClient) {
+        video.addEventListener('click', () => {
+          if (video.muted) unmuteAudioNow();
+          togglePlayPause();
+        });
+        video.addEventListener('play', () => {
+          updatePlayPauseIcons();
+          wakeControls();
+        });
+        video.addEventListener('pause', () => {
+          updatePlayPauseIcons();
+          if (videoStage) videoStage.classList.remove('fullscreen-idle');
+          if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
+        });
+        video.addEventListener('playing', () => {
+          engine.showSpinner(false);
+          wakeControls();
+        });
+        video.addEventListener('waiting', () => {
+          engine.showSpinner(true, "Buffering Stream...");
+        });
+      }
+
+      if (btnPlayPause) btnPlayPause.addEventListener('click', togglePlayPause);
+      if (btnPrevChannel) btnPrevChannel.addEventListener('click', () => {
+        if (state.currentChannelIndex > 0) playChannel(state.currentChannelIndex - 1);
+      });
+      if (btnNextChannel) btnNextChannel.addEventListener('click', () => {
+        if (state.currentChannelIndex < state.filteredChannels.length - 1) playChannel(state.currentChannelIndex + 1);
+      });
+      if (btnFullscreen) btnFullscreen.addEventListener('click', () => toggleFullscreenMode());
+      if (btnHeaderFullscreen) btnHeaderFullscreen.addEventListener('click', () => toggleFullscreenMode());
+
+      if (btnMute) {
+        btnMute.addEventListener('click', () => {
+          if (video) {
+            video.muted = !video.muted;
+            btnMute.innerHTML = video.muted ? '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>' : '<i class="fa-solid fa-volume-high text-xs"></i>';
+            if (unmuteBanner && !video.muted) unmuteBanner.classList.add('hidden');
+            broadcastTVState();
+          }
+        });
+      }
+
+      if (volSlider) {
+        volSlider.addEventListener('input', (e) => {
+          if (video) {
+            video.volume = parseFloat(e.target.value);
+            video.muted = false;
+            if (unmuteBanner) unmuteBanner.classList.add('hidden');
+            broadcastTVState();
+          }
+        });
+      }
+
+      if (btnAspect) {
+        btnAspect.addEventListener('click', () => {
+          state.aspectIndex = (state.aspectIndex + 1) % state.aspectModes.length;
+          video.className = `w-full h-full ${state.aspectModes[state.aspectIndex]} bg-black`;
+          btnAspect.textContent = state.aspectLabels[state.aspectIndex];
+        });
+      }
+
+      if (btnPip) {
+        btnPip.addEventListener('click', async () => {
+          try {
+            if (document.pictureInPictureElement) {
+              await document.exitPictureInPicture();
+            } else if (video) {
+              await video.requestPictureInPicture();
+            }
+          } catch (e) {}
+        });
+      }
+
+      const tabChannels = document.getElementById('tab-btn-channels');
+      const tabEpg = document.getElementById('tab-btn-epg');
+      const tabFavs = document.getElementById('tab-btn-favs');
+
+      function switchTab(view) {
+        if (viewChannels) viewChannels.classList.toggle('hidden', view !== 'channels');
+        if (viewEpg) viewEpg.classList.toggle('hidden', view !== 'epg');
+        if (viewFavorites) viewFavorites.classList.toggle('hidden', view !== 'favs');
+
+        [tabChannels, tabEpg, tabFavs].forEach(b => {
+          if (b) {
+            b.classList.remove('bg-brand-600', 'text-white');
+            b.classList.add('text-slate-400');
+          }
+        });
+
+        if (view === 'channels' && tabChannels) {
+          tabChannels.classList.add('bg-brand-600', 'text-white');
+        } else if (view === 'epg' && tabEpg) {
+          tabEpg.classList.add('bg-brand-600', 'text-white');
+          generateSyntheticEpg();
+        } else if (view === 'favs' && tabFavs) {
+          tabFavs.classList.add('bg-brand-600', 'text-white');
+          updateFavoritesUI();
+        }
+      }
+
+      if (tabChannels) tabChannels.addEventListener('click', () => switchTab('channels'));
+      if (tabEpg) tabEpg.addEventListener('click', () => switchTab('epg'));
+      if (tabFavs) tabFavs.addEventListener('click', () => switchTab('favs'));
+
+      if (searchInput) searchInput.addEventListener('input', filterChannels);
+      if (regionFilter) regionFilter.addEventListener('change', filterChannels);
+      if (categoryFilter) categoryFilter.addEventListener('change', filterChannels);
+
+      const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+      const channelSidebar = document.getElementById('channel-sidebar');
+      if (btnToggleSidebar && channelSidebar) {
+        btnToggleSidebar.addEventListener('click', () => {
+          channelSidebar.classList.toggle('hidden');
+        });
+      }
+
+      const btnOpenRemote = document.getElementById('btn-open-remote-modal');
+      const btnCloseRemote = document.getElementById('btn-close-remote-modal');
+      const modalRemote = document.getElementById('modal-remote');
+      const btnOpenM3u = document.getElementById('btn-open-m3u-modal');
+      const btnCloseM3u = document.getElementById('btn-close-m3u-modal');
+      const btnCancelM3u = document.getElementById('btn-cancel-m3u');
+      const modalM3u = document.getElementById('modal-m3u');
+      const btnFetchM3u = document.getElementById('btn-fetch-m3u');
+      const btnCopyRemote = document.getElementById('btn-copy-remote-link');
+
+      if (btnOpenRemote) {
+        btnOpenRemote.addEventListener('click', () => {
+          setupRemoteModal();
+          if (modalRemote) modalRemote.classList.remove('hidden');
+        });
+      }
+      if (btnCloseRemote) btnCloseRemote.addEventListener('click', () => modalRemote.classList.add('hidden'));
+      if (btnOpenM3u) btnOpenM3u.addEventListener('click', () => modalM3u.classList.remove('hidden'));
+      if (btnCloseM3u) btnCloseM3u.addEventListener('click', () => modalM3u.classList.add('hidden'));
+      if (btnCancelM3u) btnCancelM3u.addEventListener('click', () => modalM3u.classList.add('hidden'));
+
+      if (btnFetchM3u) {
+        btnFetchM3u.addEventListener('click', () => {
+          const urlInput = document.getElementById('input-m3u-url');
+          if (urlInput && urlInput.value) {
+            loadM3uPlaylist(urlInput.value.trim());
+          }
+        });
+      }
+
+      if (btnCopyRemote) {
+        btnCopyRemote.addEventListener('click', () => {
+          const remoteUrl = `${window.location.origin}${window.location.pathname}?remote=${state.roomId}`;
+          copyToClipboard(remoteUrl);
+          btnCopyRemote.textContent = "Copied!";
+          setTimeout(() => btnCopyRemote.innerHTML = '<i class="fa-regular fa-copy mr-1"></i>Copy Link', 2000);
+        });
+      }
+
+      if (videoStage) {
+        ['mousemove', 'mousedown', 'touchstart', 'touchmove', 'keydown'].forEach(evt => {
+          videoStage.addEventListener(evt, wakeControls, { passive: true });
+        });
+      }
+
+      if (playerControls) {
+        playerControls.addEventListener('mouseenter', () => {
+          if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
+          if (videoStage) videoStage.classList.remove('fullscreen-idle');
+        });
+        playerControls.addEventListener('mouseleave', wakeControls);
+      }
+
+      window.addEventListener('keydown', (e) => {
+        if (state.isRemoteClient || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        switch (e.code) {
+          case 'Space':
+            e.preventDefault();
+            togglePlayPause();
+            break;
+          case 'KeyF':
+            toggleFullscreenMode();
+            break;
+          case 'KeyM':
+            if (video) video.muted = !video.muted;
+            break;
+          case 'ArrowUp':
+            if (video) video.volume = Math.min(1, video.volume + 0.05);
+            break;
+          case 'ArrowDown':
+            if (video) video.volume = Math.max(0, video.volume - 0.05);
+            break;
+          case 'ArrowRight':
+          case 'KeyN':
+            if (state.currentChannelIndex < state.filteredChannels.length - 1) playChannel(state.currentChannelIndex + 1);
+            break;
+          case 'ArrowLeft':
+          case 'KeyP':
+            if (state.currentChannelIndex > 0) playChannel(state.currentChannelIndex - 1);
+            break;
+        }
+      });
+    }
+
+    function closeModals() {
+      const modalRemote = document.getElementById('modal-remote');
+      const modalM3u = document.getElementById('modal-m3u');
+      if (modalRemote) modalRemote.classList.add('hidden');
+      if (modalM3u) modalM3u.classList.add('hidden');
+    }
+
+    function copyToClipboard(text) {
+      const tempInput = document.createElement('input');
+      tempInput.style.position = 'absolute';
+      tempInput.style.left = '-1000px';
+      tempInput.value = text;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      try {
+        document.execCommand('copy');
+      } catch (e) {}
+      document.body.removeChild(tempInput);
+    }
+
+    window.onload = function () {
+      checkAndLaunchRemoteView();
+      setupEventListeners();
+      initRemoteSync();
+
+      if (!state.isRemoteClient) {
+        engine.initHls();
+        renderChannelList();
+        updateFavoritesUI();
+        playChannel(0);
+
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+      } else {
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+        renderRemoteChannelsList();
+        renderRemoteFavsList();
+      }
+    };
+  </script>
+</body>
+</html>
