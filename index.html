@@ -1474,7 +1474,8 @@
           parsedChannels.forEach(c => {
             if (existingMap.has(c.url)) {
               const existing = existingMap.get(c.url);
-              if (c.language) existing.language = c.language;
+              if (defaultLanguage) existing.language = defaultLanguage;
+              else if (c.language) existing.language = c.language;
               if (c.logo && !existing.logo) existing.logo = c.logo;
               if (c.group && (!existing.group || existing.group === 'Undefined')) existing.group = c.group;
             } else {
@@ -1506,18 +1507,23 @@
     function inferChannelLanguage(name = '', tvgId = '', group = '') {
       const text = `${name} ${tvgId} ${group}`.toLowerCase();
 
+      // Explicit Tamil Channel Patterns (Win TV, Village TV, Ultimate TV, Sun, Vijay, etc.)
+      if (/tamil|wintv|win\s*tv|villagetv|village\s*tv|ultimatetv|ultimate\s*tv|sun\s*tv|kalaignar|vijay|zeetamil|polimer|puthiyathalaimurai|news7|jaya|captain|lotus|rajtv|thanthai|ddpodhigai|vettri|makkal|vendhar|isaiaruvi|seithigal|sirippoli|vasanth|chithiram|pepper|mega\s*tv|murasu/i.test(text)) {
+        return 'Tamil';
+      }
+      // Explicit Malayalam Channel Patterns
       if (/malayalam|kerala|kairali|asianet|manorama|mathrubhumi|mediaone|janam|flowers|amrita|kaumudy|reporter|zeekeralam|surya|kochu|ddmalayalam|darshana|goodness|shalom|harvest|acv|cmalayalam|anandtv/i.test(text)) {
         return 'Malayalam';
       }
-      if (/kannada|suvarna|publictv|udaya|kasthuri|powertv|rajnews.*kannada|ddchandana|colors.*kannada|zeekannada/i.test(text)) {
+      // Explicit Kannada Channel Patterns
+      if (/kannada|suvarna|publictv|public\s*tv|udaya|kasthuri|powertv|power\s*tv|rajnews.*kannada|ddchandana|colors.*kannada|zeekannada|bTV|vistara/i.test(text)) {
         return 'Kannada';
       }
-      if (/tamil|sun.*tv|kalaignar|vijay|zeetamil|polimer|puthiyathalaimurai|news7.*tamil|jaya|captain|lotus|rajtv|thanthai|ddpodhigai/i.test(text)) {
-        return 'Tamil';
-      }
-      if (/telugu|tv9.*telugu|ntv|abn|v6|sakshi|etv|tnews|zeetelugu|gemini|mahaa|10tv|ddyadagiri|ddsaptagiri/i.test(text)) {
+      // Explicit Telugu Channel Patterns (\b boundaries required so "wintv" does NOT match "ntv")
+      if (/telugu|tv9.*telugu|\bntv\b|\babn\b|\bv6\b|sakshi|\betv\b|tnews|t\s*news|zeetelugu|gemini|mahaa|\b10tv\b|\b99tv\b|\b6tv\b|ddyadagiri|ddsaptagiri|subhavaartha|bhakthi|svbc|hmtv|prime9|studio\s*n/i.test(text)) {
         return 'Telugu';
       }
+      // Explicit Hindi Channel Patterns
       if (/hindi|aajtak|abpnews|indiatv|republicbharat|zeenews|ndtvindia|news18india|tv9bharatvarsh|ddnational|news24/i.test(text)) {
         return 'Hindi';
       }
@@ -1562,7 +1568,7 @@
           }
 
           if (!currentInfo.language) {
-            currentInfo.language = inferChannelLanguage(currentInfo.name, currentInfo.tvgId, currentInfo.group) || defaultLanguage;
+            currentInfo.language = defaultLanguage || inferChannelLanguage(currentInfo.name, currentInfo.tvgId, currentInfo.group);
           }
         } else if (line.startsWith('http://') || line.startsWith('https://')) {
           if (currentInfo) {
