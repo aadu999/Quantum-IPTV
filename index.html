@@ -1209,6 +1209,18 @@
         language: "English",
         url: "https://rakuten-euronews-1-gb.samsung.wurl.tv/playlist.m3u8",
         program: "European Headline Edition"
+      },
+      {
+        id: "demo-series-1",
+        name: "Stranger Things (Demo Series)",
+        logo: "https://image.tmdb.org/t/p/w500/x2LSRK2Cm7MZhjluni1msVJ3wDF.jpg",
+        group: "TV Series",
+        country: "US",
+        language: "English",
+        type: "series",
+        seriesId: "000018",
+        url: "http://ns106911.ip-51-81-106.us:25461/series/000018/11111/155115.mkv",
+        program: "Season 1-4 • Sci-Fi Drama"
       }
     ];
 
@@ -3422,15 +3434,20 @@
       if (!ch) return ch;
       const url = (ch.url || '').toLowerCase();
       const grp = (ch.group || '').toLowerCase();
+      const type = (ch.type || '').toLowerCase();
 
-      const isLiveStreamUrl = url.endsWith('.m3u8') || url.endsWith('.ts') || url.includes('/live/') || url.includes('get.php') || url.includes('iptv-org.github.io') || url.includes('akamaized.net') || url.includes('cloudfront.net') || url.includes('stream') || url.includes('master');
-      const isVodUrl = url.includes('/movie/') || (/\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(url) && !isLiveStreamUrl);
-      const isSeriesUrl = url.includes('/series/');
+      // Rule 1: Priority check for TV Series (by type, seriesId, /series/ URL pattern, or 'series' group)
+      if (type === 'series' || ch.seriesId || url.includes('/series/') || grp.includes('series')) {
+        ch.type = 'series';
+        return ch;
+      }
+
+      // Rule 2: Xtream VOD Movies or static movie video extensions
+      const isLiveStreamUrl = url.endsWith('.m3u8') || url.endsWith('.ts') || url.includes('/live/') || url.includes('iptv-org.github.io') || url.includes('akamaized.net') || url.includes('cloudfront.net') || url.includes('stream') || url.includes('master');
+      const isVodUrl = type === 'vod' || ch.vodId || url.includes('/movie/') || (/\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(url) && !isLiveStreamUrl);
 
       if (isVodUrl) {
         ch.type = 'vod';
-      } else if (isSeriesUrl) {
-        ch.type = 'series';
       } else {
         ch.type = 'live';
       }
