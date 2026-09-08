@@ -14,6 +14,13 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   
   <!-- Tailwind CSS -->
+  <script>
+    const _origWarn = console.warn;
+    console.warn = function(...args) {
+      if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
+      _origWarn.apply(console, args);
+    };
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- HLS.js Video Streaming Engine -->
@@ -955,7 +962,7 @@
         this.showSpinner(true, "Buffering Stream...");
         this.stallCount = 0;
         this.retryCount = 0;
-        this.proxyTried = false;
+        this.proxyCount = 0;
 
         let targetUrl = url;
         // If app is served over HTTPS and stream is plain HTTP, auto-proxy via SSL wrapper to bypass Mixed Content blocking
@@ -977,16 +984,35 @@
         }
       }
 
+      onStreamPlaying() {
+        this.showSpinner(false);
+        hideOfflineOverlay();
+        this.updateHudResolution();
+      }
+
+      onStreamFailed(reason = "Playback error") {
+        this.showSpinner(false);
+        const curCh = state.filteredChannels[state.currentChannelIndex];
+        if (curCh) {
+          state.offlineChannels.add(curCh.id);
+          showOfflineOverlay(curCh);
+        }
+      }
+
       fallbackToProxy() {
         const curCh = state.filteredChannels[state.currentChannelIndex];
         if (!curCh) return;
         
+        this.proxyCount = (this.proxyCount || 0) + 1;
         let proxiedUrl;
-        if (!this.proxyTried) {
-          this.proxyTried = true;
+        
+        if (this.proxyCount === 1) {
           proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
-        } else {
+        } else if (this.proxyCount === 2) {
           proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
+        } else {
+          this.onStreamFailed("Channel stream unplayable");
+          return;
         }
 
         if (this.hls) {
@@ -994,7 +1020,9 @@
           this.hls.startLoad();
         } else if (this.video) {
           this.video.src = proxiedUrl;
-          this.video.play().catch(() => {});
+          this.video.play().catch(() => {
+            this.onStreamFailed("Channel stream unplayable");
+          });
         }
       }
 
