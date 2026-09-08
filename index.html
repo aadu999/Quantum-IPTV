@@ -1413,6 +1413,34 @@
       }).join('');
     }
 
+    function updateLanguageDropdown() {
+      const languageFilter = document.getElementById('language-filter');
+      if (!languageFilter) return;
+
+      const currentValue = languageFilter.value || 'ALL';
+
+      const langCounts = {};
+      state.channels.forEach(ch => {
+        if (ch.language) {
+          langCounts[ch.language] = (langCounts[ch.language] || 0) + 1;
+        }
+      });
+
+      const sortedLangs = Object.keys(langCounts).sort((a, b) => langCounts[b] - langCounts[a]);
+
+      let html = `<option value="ALL">All Languages (${state.channels.length.toLocaleString()})</option>`;
+      sortedLangs.forEach(lang => {
+        html += `<option value="${lang}">${lang} (${langCounts[lang].toLocaleString()})</option>`;
+      });
+
+      languageFilter.innerHTML = html;
+      if (langCounts[currentValue] || currentValue === 'ALL') {
+        languageFilter.value = currentValue;
+      } else {
+        languageFilter.value = 'ALL';
+      }
+    }
+
     async function loadM3uPlaylist(url, isBackground = false, defaultLanguage = null) {
       if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, "Fetching M3U Playlist...");
       try {
@@ -1432,14 +1460,29 @@
           throw new Error('Invalid M3U playlist format');
         }
 
-        if (!defaultLanguage && url.includes('/languages/mal.m3u')) defaultLanguage = 'Malayalam';
+        if (!defaultLanguage) {
+          if (url.includes('/languages/mal.m3u')) defaultLanguage = 'Malayalam';
+          else if (url.includes('/languages/tel.m3u')) defaultLanguage = 'Telugu';
+          else if (url.includes('/languages/tam.m3u')) defaultLanguage = 'Tamil';
+          else if (url.includes('/languages/kan.m3u')) defaultLanguage = 'Kannada';
+          else if (url.includes('/languages/hin.m3u')) defaultLanguage = 'Hindi';
+        }
 
         const parsedChannels = parseM3U(content, defaultLanguage);
         if (parsedChannels.length > 0) {
-          const existingUrls = new Set(state.channels.map(c => c.url));
-          const newChannels = parsedChannels.filter(c => !existingUrls.has(c.url));
-          state.channels = [...state.channels, ...newChannels];
+          const existingMap = new Map(state.channels.map(c => [c.url, c]));
+          parsedChannels.forEach(c => {
+            if (existingMap.has(c.url)) {
+              const existing = existingMap.get(c.url);
+              if (c.language) existing.language = c.language;
+              if (c.logo && !existing.logo) existing.logo = c.logo;
+              if (c.group && (!existing.group || existing.group === 'Undefined')) existing.group = c.group;
+            } else {
+              state.channels.push(c);
+            }
+          });
           
+          updateLanguageDropdown();
           filterChannels();
 
           const countBadge = document.getElementById('badge-channels-count');
@@ -1631,6 +1674,8 @@
 
     function handleIncomingRemoteCommand(msg) {
       if (!msg || !msg.action || state.isRemoteClient) return;
+
+      closeModals();
 
       switch (msg.action) {
         case 'REQUEST_SYNC':
@@ -2323,9 +2368,17 @@
 
         loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
         loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tel.m3u', true, 'Telugu');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tam.m3u', true, 'Tamil');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
       } else {
         loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
         loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tel.m3u', true, 'Telugu');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tam.m3u', true, 'Tamil');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
+        loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
         renderRemoteChannelsList();
         renderRemoteFavsList();
       }
