@@ -290,10 +290,27 @@
       <!-- Bottom Video Controls Overlay Bar -->
       <div id="player-controls" class="bg-slate-900/95 border-t border-slate-800/80 px-4 py-2.5 flex flex-col gap-2 z-30 transition-all duration-300 backdrop-blur-md">
         
-        <!-- Stream Buffer Visualizer Strip -->
-        <div class="relative w-full h-1 bg-slate-800 rounded-full overflow-hidden cursor-pointer">
-          <div id="progress-buffer" class="absolute top-0 left-0 h-full bg-slate-700/70 w-0 transition-all duration-200"></div>
-          <div id="progress-played" class="absolute top-0 left-0 h-full bg-brand-500 w-0 transition-all duration-100"></div>
+        <!-- Interactive Seek Bar / Scrubbing Bar -->
+        <div class="relative w-full group py-0.5">
+          <div id="seek-bar-container" onclick="handleSeekBarClick(event)" class="relative w-full h-1.5 hover:h-2.5 bg-slate-800 rounded-full cursor-pointer transition-all duration-150 flex items-center">
+            <div id="progress-buffer" class="absolute top-0 left-0 h-full bg-slate-700/60 rounded-full w-0 transition-all duration-200 pointer-events-none"></div>
+            <div id="progress-played" class="absolute top-0 left-0 h-full bg-gradient-to-r from-brand-500 to-cyan-400 rounded-full w-0 transition-all duration-75 pointer-events-none"></div>
+            <div id="seek-handle" class="absolute top-1/2 -translate-y-1/2 -ml-1.5 w-3 h-3 bg-white border border-brand-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md pointer-events-none"></div>
+          </div>
+          
+          <!-- VOD & Series Timestamps and Seeking Controls -->
+          <div id="hud-time-container" class="hidden flex items-center justify-between text-[10px] text-slate-400 font-mono mt-1 px-0.5">
+            <span id="hud-time-current" class="text-brand-300 font-bold">00:00:00</span>
+            <div class="flex items-center gap-2">
+              <button onclick="seekVideo(-10)" class="hover:text-white px-2 py-0.5 bg-slate-800 hover:bg-brand-600 rounded text-[9px] transition border border-slate-700/60" title="Rewind 10s (Left Arrow / J)">
+                <i class="fa-solid fa-rotate-left mr-1 text-[8px]"></i>-10s
+              </button>
+              <button onclick="seekVideo(10)" class="hover:text-white px-2 py-0.5 bg-slate-800 hover:bg-brand-600 rounded text-[9px] transition border border-slate-700/60" title="Forward 10s (Right Arrow / L)">
+                +10s<i class="fa-solid fa-rotate-right ml-1 text-[8px]"></i>
+              </button>
+            </div>
+            <span id="hud-time-duration" class="text-slate-300 font-bold">00:00:00</span>
+          </div>
         </div>
 
         <!-- Controls Row -->
@@ -330,8 +347,34 @@
             </div>
           </div>
 
-          <!-- Right Controls: Aspect Ratio, PiP, Fullscreen -->
+          <!-- Right Controls: Subtitles, Audio, Aspect Ratio, PiP, Fullscreen -->
           <div class="flex items-center gap-1.5 sm:gap-2">
+            <!-- Subtitles Button & Popover -->
+            <div class="relative">
+              <button id="btn-subtitles" onclick="toggleSubtitlePopover(event)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-mono border border-slate-700/60 transition flex items-center gap-1" title="Subtitles / Closed Captions">
+                <i class="fa-solid fa-closed-captioning text-xs"></i><span id="subtitles-label">CC</span>
+              </button>
+              <div id="popover-subtitles" class="absolute bottom-full right-0 mb-2 w-48 bg-slate-900 border border-slate-800 rounded-xl p-2 shadow-2xl z-50 hidden space-y-1 text-xs">
+                <div class="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 border-b border-slate-800">Subtitles (CC)</div>
+                <div id="subtitles-track-list" class="space-y-0.5 max-h-40 overflow-y-auto">
+                  <div class="p-2 text-center text-slate-500 text-[10px]">No subtitle tracks detected</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Audio Track Button & Popover -->
+            <div class="relative">
+              <button id="btn-audio-tracks" onclick="toggleAudioPopover(event)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-mono border border-slate-700/60 transition flex items-center gap-1" title="Audio Track / Language">
+                <i class="fa-solid fa-language text-xs"></i><span id="audio-label">Audio</span>
+              </button>
+              <div id="popover-audio" class="absolute bottom-full right-0 mb-2 w-48 bg-slate-900 border border-slate-800 rounded-xl p-2 shadow-2xl z-50 hidden space-y-1 text-xs">
+                <div class="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 border-b border-slate-800">Audio Language</div>
+                <div id="audio-track-list" class="space-y-0.5 max-h-40 overflow-y-auto">
+                  <div class="p-2 text-center text-slate-500 text-[10px]">No audio tracks detected</div>
+                </div>
+              </div>
+            </div>
+
             <button id="btn-aspect" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-mono border border-slate-700/60" title="Cycle Aspect Ratio (16:9, Fill, Stretch)">
               16:9
             </button>
@@ -617,6 +660,102 @@
     </div>
   </div>
 
+  <!-- Modal: TV Series Explorer & Seasons / Episode Manager -->
+  <div id="modal-series-explorer" class="fixed inset-0 bg-black/85 backdrop-blur-md z-[110] flex items-center justify-center p-2 sm:p-4 hidden transition-all duration-300">
+    <div id="series-explorer-box" class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden transition-all duration-300">
+      
+      <!-- Top Action Bar -->
+      <div class="h-12 bg-slate-950/80 border-b border-slate-800/80 px-4 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded bg-brand-500/20 text-brand-400 border border-brand-500/30 text-[10px] font-bold uppercase tracking-wider">
+            <i class="fa-solid fa-clapperboard mr-1"></i>TV Series Explorer
+          </span>
+          <span id="series-header-title" class="text-xs font-semibold text-slate-300 truncate max-w-[200px] sm:max-w-md">Series Info</span>
+        </div>
+        
+        <div class="flex items-center gap-2">
+          <!-- Expand View Toggle Button -->
+          <button id="btn-toggle-series-expand" onclick="toggleSeriesExpandView()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700/60 transition flex items-center gap-1.5" title="Expand View for Better Browse Experience">
+            <i id="series-expand-icon" class="fa-solid fa-expand text-[11px]"></i>
+            <span id="series-expand-label">Expand</span>
+          </button>
+          
+          <!-- Close Modal Button -->
+          <button onclick="closeSeriesExplorer()" class="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+            <i class="fa-solid fa-xmark text-sm"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Scrollable Content Area -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+        
+        <!-- Hero Details Header Card -->
+        <div class="flex flex-col sm:flex-row gap-4 sm:gap-6 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 sm:p-5 relative overflow-hidden">
+          
+          <!-- Cover Poster Image -->
+          <img id="series-poster" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23475569'%3E%3Crect width='24' height='24' rx='4'/%3E%3C/svg%3E" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-32 sm:w-44 h-44 sm:h-60 rounded-xl object-cover bg-slate-800 border border-slate-700 shadow-xl shrink-0 self-center sm:self-start">
+          
+          <!-- Series Metadata Info -->
+          <div class="flex-1 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
+                <h2 id="series-title" class="text-xl sm:text-2xl font-black text-white tracking-tight">Series Title</h2>
+                <div id="series-rating-badge" class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold font-mono flex items-center gap-1.5 shrink-0 shadow">
+                  <i class="fa-solid fa-star text-amber-400"></i>
+                  <span id="series-rating-val">8.9 / 10</span>
+                </div>
+              </div>
+
+              <!-- Tags Strip: Year, Genre, Director -->
+              <div class="flex items-center gap-2 flex-wrap text-xs text-slate-400 mb-3">
+                <span id="series-genre" class="px-2 py-0.5 rounded-md bg-brand-950/80 text-brand-300 border border-brand-800/50 font-medium">Drama / Sci-Fi</span>
+                <span id="series-year" class="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-slate-300">2024</span>
+                <span id="series-director" class="text-slate-400 truncate max-w-xs"><i class="fa-solid fa-video mr-1 text-slate-500"></i>Director Name</span>
+              </div>
+
+              <!-- Cast -->
+              <div class="text-xs text-slate-400 mb-3 leading-relaxed">
+                <strong class="text-slate-300 font-semibold">Cast: </strong>
+                <span id="series-cast" class="text-slate-400">Actor 1, Actor 2, Actor 3</span>
+              </div>
+
+              <!-- Plot Synopsis -->
+              <p id="series-plot" class="text-xs text-slate-300/90 leading-relaxed max-h-24 overflow-y-auto pr-1 font-sans">
+                Full series plot synopsis goes here...
+              </p>
+            </div>
+
+            <!-- Quick Action Stats -->
+            <div class="flex items-center gap-4 text-xs font-mono text-slate-400 pt-2 border-t border-slate-800/60">
+              <div><i class="fa-solid fa-layer-group text-brand-400 mr-1.5"></i><span id="series-season-count">0 Seasons</span></div>
+              <div><i class="fa-solid fa-film text-brand-400 mr-1.5"></i><span id="series-episode-count">0 Episodes</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Seasons Navigation Bar -->
+        <div>
+          <div class="text-xs uppercase font-bold tracking-wider text-slate-400 mb-2 flex items-center justify-between">
+            <span>Select Season</span>
+            <span id="episodes-counter-badge" class="text-[10px] font-mono text-brand-400">0 Available Episodes</span>
+          </div>
+          <div id="series-seasons-tabs" class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-800">
+            <!-- Dynamic season pills render here -->
+          </div>
+        </div>
+
+        <!-- Episodes Grid -->
+        <div>
+          <div id="series-episodes-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <!-- Dynamic episode cards render here -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- MOBILE REMOTE SCREEN INTERFACE (Active ONLY when opened with ?remote=ROOM_ID) -->
   <div id="mobile-remote-app" class="fixed inset-0 bg-slate-950 z-[999999] flex flex-col hidden overflow-hidden select-none font-sans">
     
@@ -796,6 +935,11 @@
         country: "IN",
         language: "Malayalam",
         url: "https://amg13737-amg13737c1-amgplt0016.playout.now3.amagi.tv/playlist/amg13737-amg13737c1-amgplt0016/playlist.m3u8",
+        sources: [
+          { url: "https://amg13737-amg13737c1-amgplt0016.playout.now3.amagi.tv/playlist/amg13737-amg13737c1-amgplt0016/playlist.m3u8", sourceName: "Amagi CDN" },
+          { url: "https://mumt03.tangotv.in/Dsly5z3HASIANETMIDDLEEAST/index.m3u8", sourceName: "Tango CDN" },
+          { url: "https://asianetnews.vgcdn.net/vglive-sk-335835/playlist.m3u8", sourceName: "VG CDN" }
+        ],
         program: "Asianet Varthakal & Prime Discussions"
       },
       {
@@ -1439,88 +1583,258 @@
     const sourceFusionEngine = new QuantumSourceFusionEngine();
 
     /**
+     * Unified High-Availability Cross-Origin Fetch Engine with Multi-Proxy Failover
+     */
+    async function fetchWithProxyFallback(targetUrl, options = {}) {
+      const encoded = encodeURIComponent(targetUrl);
+      const proxies = [
+        `/api/proxy?url=${encoded}`,
+        `https://corsproxy.io/?${encoded}`,
+        `https://api.allorigins.win/raw?url=${encoded}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
+        `https://cors.eu.org/${targetUrl}`
+      ];
+
+      // If running on http: protocol and target is http:, try direct fetch first
+      if (window.location.protocol === 'http:' && targetUrl.startsWith('http://')) {
+        proxies.unshift(targetUrl);
+      }
+
+      let lastErr = null;
+      for (const proxyUrl of proxies) {
+        try {
+          const resp = await fetch(proxyUrl, {
+            ...options,
+            headers: { 'Accept': '*/*', ...(options.headers || {}) },
+            signal: AbortSignal.timeout(20000)
+          });
+          if (resp.ok) {
+            const text = await resp.text();
+            if (text && text.trim().length > 0) return text;
+          }
+        } catch (e) {
+          console.warn(`Proxy fetch failed for [${proxyUrl}]:`, e.message);
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error(`Unable to fetch resource from ${targetUrl} via direct connection or CORS proxies.`);
+    }
+
+    /**
+     * Helper to normalize Host, Username, and Password from inputs or full URLs
+     */
+    function parseXtreamInput(hostInput, userInput, passInput) {
+      let host = (hostInput || '').trim();
+      let user = (userInput || '').trim();
+      let pass = (passInput || '').trim();
+
+      if (host.includes(' ')) {
+        const parts = host.split(/\s+/);
+        if (parts.length >= 3) {
+          host = parts[0];
+          if (!user) user = parts[1];
+          if (!pass) pass = parts[2];
+        }
+      }
+
+      if (host.includes('get.php') || host.includes('player_api.php') || host.includes('username=')) {
+        try {
+          const u = new URL(host);
+          const params = new URLSearchParams(u.search);
+          if (!user && params.get('username')) user = params.get('username');
+          if (!pass && params.get('password')) pass = params.get('password');
+          host = u.origin;
+        } catch (e) {
+          const userMatch = host.match(/username=([^&]+)/);
+          const passMatch = host.match(/password=([^&]+)/);
+          if (!user && userMatch) user = userMatch[1];
+          if (!pass && passMatch) pass = passMatch[1];
+          host = host.split('/get.php')[0].split('/player_api.php')[0];
+        }
+      }
+      return { host: host.replace(/\/+$/, ''), username: user, password: pass };
+    }
+
+    /**
      * ENTERPRISE PROVIDER CONNECTORS (Xtream Codes API, Stalker Portal, XMLTV EPG)
      */
     class QuantumXtreamConnector {
-      async fetchXtreamPlaylist(host, username, password) {
-        const cleanHost = host.replace(/\/+$/, '');
-        const apiUrl = `${cleanHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+      async fetchXtreamPlaylist(hostInput, userInput, passInput) {
+        const { host, username, password } = parseXtreamInput(hostInput, userInput, passInput);
         
+        if (!host) {
+          throw new Error('Please specify a valid Xtream Host URL.');
+        }
+
+        let addedCount = 0;
+
+        // STRATEGY A: Query JSON Player API (player_api.php) if credentials are available
+        if (username && password) {
+          try {
+            const apiUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+            const authText = await fetchWithProxyFallback(apiUrl);
+            let data = null;
+            try { data = JSON.parse(authText); } catch(e) {}
+
+            if (data && data.user_info && data.user_info.auth !== 0) {
+              // Fetch Live Streams
+              try {
+                const liveUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
+                const liveText = await fetchWithProxyFallback(liveUrl);
+                const liveStreams = JSON.parse(liveText);
+                if (Array.isArray(liveStreams)) {
+                  liveStreams.forEach(item => {
+                    const streamUrl = `${host}/live/${username}/${password}/${item.stream_id}.m3u8`;
+                    const ch = {
+                      id: 'xt_live_' + item.stream_id,
+                      name: item.name,
+                      url: streamUrl,
+                      logo: item.stream_icon,
+                      group: item.category_name || 'Xtream Live',
+                      language: inferChannelLanguage(item.name),
+                      type: 'live',
+                      tvgId: item.epg_channel_id
+                    };
+                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
+                    if (!state.channels.includes(fused)) {
+                      state.channels.push(fused);
+                      addedCount++;
+                    }
+                  });
+                }
+              } catch (e) {
+                console.warn('Xtream Live Streams JSON fetch warning:', e.message);
+              }
+
+              // Fetch VOD Movies
+              try {
+                const vodUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_streams`;
+                const vodText = await fetchWithProxyFallback(vodUrl);
+                const vodStreams = JSON.parse(vodText);
+                if (Array.isArray(vodStreams)) {
+                  vodStreams.slice(0, 200).forEach(item => {
+                    const vodStreamUrl = `${host}/movie/${username}/${password}/${item.stream_id}.${item.container_extension || 'mp4'}`;
+                    const ch = {
+                      id: 'xt_vod_' + item.stream_id,
+                      name: item.name,
+                      url: vodStreamUrl,
+                      logo: item.stream_icon,
+                      group: 'VOD Movies',
+                      language: inferChannelLanguage(item.name),
+                      type: 'vod',
+                      rating: item.rating
+                    };
+                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream VOD');
+                    if (!state.channels.includes(fused)) {
+                      state.channels.push(fused);
+                      addedCount++;
+                    }
+                  });
+                }
+              } catch (e) {
+                console.warn('Xtream VOD JSON fetch warning:', e.message);
+              }
+
+              // Store Xtream credentials for Series Info lookups
+              state.lastXtreamHost = host;
+              state.lastXtreamUser = username;
+              state.lastXtreamPass = password;
+
+              // Fetch TV Series
+              try {
+                const seriesUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series`;
+                const seriesText = await fetchWithProxyFallback(seriesUrl);
+                const seriesStreams = JSON.parse(seriesText);
+                if (Array.isArray(seriesStreams)) {
+                  seriesStreams.forEach(item => {
+                    const seriesStreamUrl = `${host}/series/${username}/${password}/${item.series_id}.mkv`;
+                    const ch = {
+                      id: 'xt_series_' + item.series_id,
+                      name: item.name,
+                      url: seriesStreamUrl,
+                      logo: item.cover || item.stream_icon,
+                      cover: item.cover || item.stream_icon,
+                      plot: item.plot,
+                      rating: item.rating,
+                      cast: item.cast,
+                      director: item.director,
+                      genre: item.genre || item.category_name || 'TV Series',
+                      releaseDate: item.releaseDate,
+                      seriesId: item.series_id,
+                      group: 'TV Series',
+                      language: inferChannelLanguage(item.name),
+                      type: 'series'
+                    };
+                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream Series');
+                    if (!state.channels.includes(fused)) {
+                      state.channels.push(fused);
+                      addedCount++;
+                    }
+                  });
+                }
+              } catch (e) {
+                console.warn('Xtream Series JSON fetch warning:', e.message);
+              }
+            }
+          } catch (e) {
+            console.warn('Xtream Strategy A (JSON API) failed, falling back to Strategy B (M3U Plus Feed):', e.message);
+          }
+        }
+
+        // STRATEGY B: Xtream M3U Plus Feed Fallback (get.php) if Strategy A yielded 0 channels
+        if (addedCount === 0 && (username && password)) {
+          console.log('Initiating Xtream Strategy B (M3U Plus Feed)...');
+          const m3uPlusUrl = `${host}/get.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&type=m3u_plus`;
+          try {
+            const m3uText = await fetchWithProxyFallback(m3uPlusUrl);
+            if (m3uText && (m3uText.includes('#EXTINF') || m3uText.includes('#EXTM3U'))) {
+              const parsed = parseM3U(m3uText, null, m3uPlusUrl);
+              parsed.forEach(c => {
+                const fused = sourceFusionEngine.fuseChannel(c, 'Xtream M3U Feed');
+                if (!state.channels.includes(fused)) {
+                  state.channels.push(fused);
+                  addedCount++;
+                }
+              });
+            }
+          } catch (e) {
+            console.error('Xtream Strategy B (M3U Feed) failed:', e.message);
+          }
+        }
+
+        if (addedCount === 0) {
+          throw new Error(`Could not load channels from Xtream server (${host}). Please check credentials, port, or server status.`);
+        }
+
+        updateLanguageDropdown();
+        filterChannels();
+        return addedCount;
+      }
+
+      async fetchSeriesInfo(seriesId) {
+        if (!seriesId || !state.lastXtreamHost || !state.lastXtreamUser || !state.lastXtreamPass) return null;
+        const host = state.lastXtreamHost;
+        const username = state.lastXtreamUser;
+        const password = state.lastXtreamPass;
+        const infoUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`;
         try {
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
-          const resp = await fetch(proxyUrl);
-          if (!resp.ok) throw new Error('Xtream API host unreachable');
-          const data = await resp.json();
-
-          if (data.user_info && data.user_info.auth === 0) {
-            throw new Error('Xtream Credentials Rejected');
-          }
-
-          // Fetch Live Streams
-          const liveUrl = `${cleanHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
-          const liveResp = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(liveUrl)}`);
-          let addedCount = 0;
-          if (liveResp.ok) {
-            const liveStreams = await liveResp.json();
-            liveStreams.forEach(item => {
-              const streamUrl = `${cleanHost}/live/${username}/${password}/${item.stream_id}.m3u8`;
-              const ch = {
-                id: 'xt_live_' + item.stream_id,
-                name: item.name,
-                url: streamUrl,
-                logo: item.stream_icon,
-                group: item.category_name || 'Xtream Live',
-                language: inferChannelLanguage(item.name),
-                type: 'live',
-                tvgId: item.epg_channel_id
-              };
-              const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
-              if (!state.channels.includes(fused)) state.channels.push(fused);
-              addedCount++;
-            });
-          }
-
-          // Fetch VOD Movies
-          const vodUrl = `${cleanHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_streams`;
-          const vodResp = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(vodUrl)}`);
-          if (vodResp.ok) {
-            const vodStreams = await vodResp.json();
-            vodStreams.slice(0, 100).forEach(item => {
-              const vodStreamUrl = `${cleanHost}/movie/${username}/${password}/${item.stream_id}.${item.container_extension || 'mp4'}`;
-              const ch = {
-                id: 'xt_vod_' + item.stream_id,
-                name: item.name,
-                url: vodStreamUrl,
-                logo: item.stream_icon,
-                group: 'VOD Movies',
-                language: inferChannelLanguage(item.name),
-                type: 'vod',
-                rating: item.rating
-              };
-              const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream VOD');
-              if (!state.channels.includes(fused)) state.channels.push(fused);
-              addedCount++;
-            });
-          }
-
-          filterChannels();
-          return addedCount;
+          const text = await fetchWithProxyFallback(infoUrl);
+          return JSON.parse(text);
         } catch (e) {
-          console.error('Xtream Connector Error:', e);
-          throw e;
+          console.warn(`Failed to fetch series info for ID ${seriesId}:`, e.message);
+          return null;
         }
       }
     }
     const xtreamConnector = new QuantumXtreamConnector();
+    window.xtreamConnector = xtreamConnector;
 
     class QuantumStalkerConnector {
       async fetchStalkerPortal(portalUrl, macAddress) {
         const cleanPortal = portalUrl.replace(/\/+$/, '');
         const handshakeUrl = `${cleanPortal}?type=stb&action=handshake&mac=${encodeURIComponent(macAddress)}`;
         try {
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(handshakeUrl)}`;
-          const resp = await fetch(proxyUrl);
-          if (!resp.ok) throw new Error('Stalker Portal handshake failed');
+          await fetchWithProxyFallback(handshakeUrl);
           return true;
         } catch (e) {
           console.error('Stalker Connector Error:', e);
@@ -1533,11 +1847,7 @@
     class QuantumXMLTVParser {
       async loadExternalEPG(xmltvUrl) {
         try {
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(xmltvUrl)}`;
-          const resp = await fetch(proxyUrl);
-          if (!resp.ok) throw new Error('XMLTV download failed');
-          const xmlText = await resp.text();
-          
+          const xmlText = await fetchWithProxyFallback(xmltvUrl);
           const parser = new DOMParser();
           const xmlDoc = parser.parseFromString(xmlText, "text/xml");
           const programmes = xmlDoc.getElementsByTagName("programme");
@@ -1670,14 +1980,29 @@
 
         let targetUrl = url;
         if (window.location.protocol === 'https:' && targetUrl.startsWith('http://')) {
-          if (/http:\/\/\d+\.\d+\.\d+\.\d+/.test(url)) {
-            targetUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-          } else {
-            targetUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-          }
+          targetUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
         }
 
-        if (this.hls && Hls.isSupported()) {
+        const isDirectMedia = /\.(mp4|mkv|avi|mov|mp3|aac|flv)(\?.*)?$/i.test(url) || url.includes('/movie/') || url.includes('/series/');
+
+        if (isDirectMedia) {
+          if (this.hls) {
+            this.hls.stopLoad();
+            this.hls.detachMedia();
+          }
+          if (this.video) {
+            this.video.src = targetUrl;
+            this.video.addEventListener('loadeddata', () => {
+              this.showSpinner(false);
+              this.attemptAutoplay();
+            }, { once: true });
+            this.video.addEventListener('error', () => {
+              this.fallbackToProxy();
+            }, { once: true });
+            this.attemptAutoplay();
+          }
+        } else if (this.hls && Hls.isSupported()) {
+          this.hls.attachMedia(this.video);
           this.hls.loadSource(targetUrl);
         } else if (this.video && this.video.canPlayType('application/vnd.apple.mpegurl')) {
           this.video.src = targetUrl;
@@ -1738,12 +2063,12 @@
         let proxiedUrl;
         
         if (this.proxyCount === 1) {
-          if (/http:\/\/\d+\.\d+\.\d+\.\d+/.test(curCh.url)) {
-            proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
-          } else {
-            proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
-          }
+          proxiedUrl = `/api/proxy?url=${encodeURIComponent(curCh.url)}`;
         } else if (this.proxyCount === 2) {
+          proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
+        } else if (this.proxyCount === 3) {
+          proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
+        } else if (this.proxyCount === 4) {
           proxiedUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(curCh.url)}`;
         } else {
           this.onStreamFailed("Channel stream unplayable");
@@ -1815,6 +2140,40 @@
           }
         }
         this.lastCurrentTime = this.video.currentTime;
+        this.updateTimeAndSeekBar();
+      }
+
+      updateTimeAndSeekBar() {
+        if (!this.video) return;
+        const curTime = this.video.currentTime || 0;
+        const dur = this.video.duration;
+
+        const timeContainer = document.getElementById('hud-time-container');
+        const curLabel = document.getElementById('hud-time-current');
+        const durLabel = document.getElementById('hud-time-duration');
+        const progressPlayed = document.getElementById('progress-played');
+        const progressBuffer = document.getElementById('progress-buffer');
+        const seekHandle = document.getElementById('seek-handle');
+
+        if (dur && isFinite(dur) && dur > 0) {
+          if (timeContainer) timeContainer.classList.remove('hidden');
+          if (curLabel) curLabel.textContent = formatTimestamp(curTime);
+          if (durLabel) durLabel.textContent = formatTimestamp(dur);
+
+          const percent = Math.min(100, Math.max(0, (curTime / dur) * 100));
+          if (progressPlayed) progressPlayed.style.width = `${percent}%`;
+          if (seekHandle) seekHandle.style.left = `${percent}%`;
+
+          if (this.video.buffered && this.video.buffered.length > 0) {
+            const bufEnd = this.video.buffered.end(this.video.buffered.length - 1);
+            const bufPercent = Math.min(100, Math.max(0, (bufEnd / dur) * 100));
+            if (progressBuffer) progressBuffer.style.width = `${bufPercent}%`;
+          }
+        } else {
+          if (timeContainer) timeContainer.classList.add('hidden');
+          if (progressPlayed) progressPlayed.style.width = '100%';
+          if (seekHandle) seekHandle.style.left = '100%';
+        }
       }
 
       updateHudResolution() {
@@ -1823,6 +2182,46 @@
         if (this.video.videoWidth) {
           hudRes.textContent = `${this.video.videoHeight}p`;
         }
+      }
+
+      updateSubtitlesAndAudioTracks() {
+        const subList = document.getElementById('subtitles-track-list');
+        const audioList = document.getElementById('audio-track-list');
+        if (!subList || !audioList) return;
+
+        // Subtitles from Hls.js
+        let subHtml = `<button onclick="selectSubtitleTrack(-1)" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${!this.hls || this.hls.subtitleTrack === -1 ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'} text-xs">Off</button>`;
+        if (this.hls && this.hls.subtitleTracks && this.hls.subtitleTracks.length > 0) {
+          this.hls.subtitleTracks.forEach((tr, idx) => {
+            const isSelected = this.hls.subtitleTrack === idx;
+            subHtml += `<button onclick="selectSubtitleTrack(${idx})" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${isSelected ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'} text-xs flex items-center justify-between">
+              <span>${tr.name || tr.lang || 'Track ' + (idx + 1)}</span>
+              ${isSelected ? '<i class="fa-solid fa-check text-brand-400"></i>' : ''}
+            </button>`;
+          });
+        } else if (this.video && this.video.textTracks && this.video.textTracks.length > 0) {
+          Array.from(this.video.textTracks).forEach((tr, idx) => {
+            const isSelected = tr.mode === 'showing';
+            subHtml += `<button onclick="selectNativeSubtitleTrack(${idx})" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${isSelected ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'} text-xs flex items-center justify-between">
+              <span>${tr.label || tr.language || 'Track ' + (idx + 1)}</span>
+              ${isSelected ? '<i class="fa-solid fa-check text-brand-400"></i>' : ''}
+            </button>`;
+          });
+        }
+        subList.innerHTML = subHtml;
+
+        // Audio Tracks from Hls.js
+        let audioHtml = `<button onclick="selectAudioTrack(-1)" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${!this.hls || this.hls.audioTrack === -1 ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'} text-xs">Default / Auto</button>`;
+        if (this.hls && this.hls.audioTracks && this.hls.audioTracks.length > 0) {
+          this.hls.audioTracks.forEach((tr, idx) => {
+            const isSelected = this.hls.audioTrack === idx;
+            audioHtml += `<button onclick="selectAudioTrack(${idx})" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${isSelected ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'} text-xs flex items-center justify-between">
+              <span>${tr.name || tr.lang || 'Audio ' + (idx + 1)}</span>
+              ${isSelected ? '<i class="fa-solid fa-check text-brand-400"></i>' : ''}
+            </button>`;
+          });
+        }
+        audioList.innerHTML = audioHtml;
       }
     }
 
@@ -1957,12 +2356,20 @@
       broadcastTVState();
     }
 
+    let isSeriesExpanded = false;
+    let currentSeriesInfoCache = null;
+
     function playChannel(index) {
       if (state.isRemoteClient) return;
       if (index < 0 || index >= state.filteredChannels.length) return;
       state.currentChannelIndex = index;
       const channel = state.filteredChannels[index];
       if (!channel) return;
+
+      if (channel.type === 'series' || (channel.url && channel.url.includes('/series/'))) {
+        openSeriesExplorer(channel);
+        return;
+      }
 
       if (currentChName) currentChName.textContent = channel.name;
       if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
@@ -1973,6 +2380,274 @@
       renderChannelList();
       broadcastTVState();
     }
+
+    async function openSeriesExplorer(channel) {
+      if (!channel) return;
+      const modal = document.getElementById('modal-series-explorer');
+      if (!modal) return;
+
+      const titleHeader = document.getElementById('series-header-title');
+      const titleMain = document.getElementById('series-title');
+      const poster = document.getElementById('series-poster');
+      const ratingVal = document.getElementById('series-rating-val');
+      const genre = document.getElementById('series-genre');
+      const year = document.getElementById('series-year');
+      const director = document.getElementById('series-director');
+      const cast = document.getElementById('series-cast');
+      const plot = document.getElementById('series-plot');
+      const tabs = document.getElementById('series-seasons-tabs');
+      const grid = document.getElementById('series-episodes-grid');
+
+      if (titleHeader) titleHeader.textContent = channel.name;
+      if (titleMain) titleMain.textContent = channel.name;
+      if (poster) poster.src = channel.cover || channel.logo || FALLBACK_LOGO;
+      if (ratingVal) ratingVal.textContent = channel.rating ? `${channel.rating} / 10` : '8.9 / 10';
+      if (genre) genre.textContent = channel.genre || channel.group || 'TV Series';
+      if (year) year.textContent = channel.releaseDate || '2024';
+      if (director) director.innerHTML = `<i class="fa-solid fa-video mr-1 text-slate-500"></i>${channel.director || 'Official Production'}`;
+      if (cast) cast.textContent = channel.cast || 'Starring ensemble cast';
+      if (plot) plot.textContent = channel.plot || `Watch full seasons and high-definition episodes of ${channel.name} with stream player controls.`;
+
+      if (tabs) tabs.innerHTML = `<div class="px-3 py-1.5 text-xs text-slate-400 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span>Loading series seasons & episodes...</div>`;
+      if (grid) grid.innerHTML = '';
+      modal.classList.remove('hidden');
+
+      if (channel.seriesId && xtreamConnector) {
+        const info = await xtreamConnector.fetchSeriesInfo(channel.seriesId);
+        currentSeriesInfoCache = info;
+        if (info && info.episodes && Object.keys(info.episodes).length > 0) {
+          renderSeriesSeasonsAndEpisodes(info);
+          return;
+        }
+      }
+
+      // Fallback direct launcher
+      const sCount = document.getElementById('series-season-count');
+      const eCount = document.getElementById('series-episode-count');
+      const bCount = document.getElementById('episodes-counter-badge');
+      if (sCount) sCount.textContent = '1 Season';
+      if (eCount) eCount.textContent = '1 Stream';
+      if (bCount) bCount.textContent = '1 Direct Stream';
+      if (tabs) tabs.innerHTML = `<button class="px-3 py-1.5 rounded-xl bg-brand-600 text-white font-bold text-xs shadow">Season 1</button>`;
+
+      if (grid) {
+        grid.innerHTML = `
+          <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-3 hover:border-brand-500/50 transition shadow-lg">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">${channel.name}</span>
+              <span class="px-2 py-0.5 rounded bg-brand-950 text-brand-300 text-[10px] font-mono font-bold">S01E01</span>
+            </div>
+            <p class="text-[10px] text-slate-400 font-mono truncate">${channel.url}</p>
+            <button onclick="playEpisodeStream('${channel.url}', '${channel.name.replace(/'/g, "\\'")}')" class="w-full py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs transition flex items-center justify-center gap-1.5 shadow">
+              <i class="fa-solid fa-play text-[10px]"></i>Play Direct Series Stream
+            </button>
+          </div>
+        `;
+      }
+    }
+    window.openSeriesExplorer = openSeriesExplorer;
+    window.state = state;
+
+    function renderSeriesSeasonsAndEpisodes(info) {
+      if (!info || !info.episodes) return;
+      const episodesObj = info.episodes;
+      const seasonNums = Object.keys(episodesObj).sort((a, b) => Number(a) - Number(b));
+      
+      let totalEpisodes = 0;
+      seasonNums.forEach(s => { totalEpisodes += (episodesObj[s] ? episodesObj[s].length : 0); });
+
+      const sCount = document.getElementById('series-season-count');
+      const eCount = document.getElementById('series-episode-count');
+      const bCount = document.getElementById('episodes-counter-badge');
+      if (sCount) sCount.textContent = `${seasonNums.length} Season${seasonNums.length > 1 ? 's' : ''}`;
+      if (eCount) eCount.textContent = `${totalEpisodes} Episodes`;
+      if (bCount) bCount.textContent = `${totalEpisodes} Available Episodes`;
+
+      let seasonsHtml = seasonNums.map((sNum, idx) => `
+        <button onclick="selectSeriesSeason('${sNum}')" id="season-tab-${sNum}" class="season-tab-btn px-3.5 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 ${idx === 0 ? 'bg-brand-600 border-brand-500 text-white shadow-md' : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'}">
+          Season ${sNum}
+        </button>
+      `).join('');
+
+      const tabs = document.getElementById('series-seasons-tabs');
+      if (tabs) tabs.innerHTML = seasonsHtml;
+
+      if (seasonNums.length > 0) {
+        selectSeriesSeason(seasonNums[0]);
+      }
+    }
+
+    function selectSeriesSeason(seasonNum) {
+      if (!currentSeriesInfoCache || !currentSeriesInfoCache.episodes) return;
+      document.querySelectorAll('.season-tab-btn').forEach(btn => {
+        btn.className = 'season-tab-btn px-3.5 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white';
+      });
+
+      const activeBtn = document.getElementById(`season-tab-${seasonNum}`);
+      if (activeBtn) {
+        activeBtn.className = 'season-tab-btn px-3.5 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 bg-brand-600 border-brand-500 text-white shadow-md';
+      }
+
+      const episodes = currentSeriesInfoCache.episodes[seasonNum] || [];
+      const host = state.lastXtreamHost || '';
+      const username = state.lastXtreamUser || '';
+      const password = state.lastXtreamPass || '';
+
+      const gridHtml = episodes.map(ep => {
+        const ext = ep.container_extension || 'mkv';
+        const epUrl = `${host}/series/${username}/${password}/${ep.id}.${ext}`;
+        const title = ep.title || `Episode ${ep.episode_num || ''}`;
+        const epNumStr = `S${String(seasonNum).padStart(2, '0')}E${String(ep.episode_num || 1).padStart(2, '0')}`;
+
+        return `
+          <div class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-2xl p-3 flex flex-col justify-between space-y-2.5 transition shadow-lg group">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <span class="text-xs font-bold text-white group-hover:text-brand-300 transition line-clamp-1">${title}</span>
+                <span class="text-[10px] text-slate-400 font-mono block">${ep.info && ep.info.duration ? ep.info.duration : 'Standard Episode'}</span>
+              </div>
+              <span class="px-2 py-0.5 rounded-md bg-brand-950 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold shrink-0">${epNumStr}</span>
+            </div>
+            <button onclick="playEpisodeStream('${epUrl}', '${title.replace(/'/g, "\\'")}')" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white font-semibold text-xs transition flex items-center justify-center gap-2 border border-slate-700/60 hover:border-brand-500 shadow active:scale-95">
+              <i class="fa-solid fa-play text-[10px] text-brand-400 group-hover:text-white"></i>Play Episode
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      const grid = document.getElementById('series-episodes-grid');
+      if (grid) grid.innerHTML = gridHtml || `<div class="p-4 text-center text-slate-500 text-xs col-span-full">No episodes found for Season ${seasonNum}.</div>`;
+    }
+
+    function toggleSeriesExpandView() {
+      const box = document.getElementById('series-explorer-box');
+      const label = document.getElementById('series-expand-label');
+      const icon = document.getElementById('series-expand-icon');
+      if (!box) return;
+
+      isSeriesExpanded = !isSeriesExpanded;
+      if (isSeriesExpanded) {
+        box.className = "bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-7xl shadow-2xl relative h-[95vh] flex flex-col overflow-hidden transition-all duration-300";
+        if (label) label.textContent = "Contract";
+        if (icon) icon.className = "fa-solid fa-compress text-[11px]";
+      } else {
+        box.className = "bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden transition-all duration-300";
+        if (label) label.textContent = "Expand";
+        if (icon) icon.className = "fa-solid fa-expand text-[11px]";
+      }
+    }
+
+    function closeSeriesExplorer() {
+      const modal = document.getElementById('modal-series-explorer');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function playEpisodeStream(streamUrl, episodeTitle = "Episode") {
+      closeSeriesExplorer();
+      if (currentChName) currentChName.textContent = episodeTitle;
+      if (currentChEpg) currentChEpg.textContent = "TV Series Episode";
+      engine.load(streamUrl);
+    }
+
+    /* Subtitle & Audio Popover Controls */
+    function toggleSubtitlePopover(e) {
+      if (e) e.stopPropagation();
+      const popSub = document.getElementById('popover-subtitles');
+      const popAud = document.getElementById('popover-audio');
+      if (popAud) popAud.classList.add('hidden');
+      if (popSub) {
+        popSub.classList.toggle('hidden');
+        if (!popSub.classList.contains('hidden')) {
+          engine.updateSubtitlesAndAudioTracks();
+        }
+      }
+    }
+
+    function toggleAudioPopover(e) {
+      if (e) e.stopPropagation();
+      const popSub = document.getElementById('popover-subtitles');
+      const popAud = document.getElementById('popover-audio');
+      if (popSub) popSub.classList.add('hidden');
+      if (popAud) {
+        popAud.classList.toggle('hidden');
+        if (!popAud.classList.contains('hidden')) {
+          engine.updateSubtitlesAndAudioTracks();
+        }
+      }
+    }
+
+    function selectSubtitleTrack(trackIdx) {
+      if (engine.hls) {
+        engine.hls.subtitleTrack = trackIdx;
+      }
+      const label = document.getElementById('subtitles-label');
+      if (label) label.textContent = trackIdx === -1 ? 'Off' : `Track ${trackIdx + 1}`;
+      const popSub = document.getElementById('popover-subtitles');
+      if (popSub) popSub.classList.add('hidden');
+    }
+
+    function selectNativeSubtitleTrack(trackIdx) {
+      if (engine.video && engine.video.textTracks) {
+        Array.from(engine.video.textTracks).forEach((tr, i) => {
+          tr.mode = (i === trackIdx) ? 'showing' : 'disabled';
+        });
+      }
+      const label = document.getElementById('subtitles-label');
+      if (label) label.textContent = trackIdx === -1 ? 'Off' : `Track ${trackIdx + 1}`;
+      const popSub = document.getElementById('popover-subtitles');
+      if (popSub) popSub.classList.add('hidden');
+    }
+
+    function selectAudioTrack(trackIdx) {
+      if (engine.hls) {
+        engine.hls.audioTrack = trackIdx;
+      }
+      const label = document.getElementById('audio-label');
+      if (label) label.textContent = trackIdx === -1 ? 'Auto' : `Track ${trackIdx + 1}`;
+      const popAud = document.getElementById('popover-audio');
+      if (popAud) popAud.classList.add('hidden');
+    }
+
+    function formatTimestamp(sec) {
+      if (isNaN(sec) || !isFinite(sec)) return "00:00:00";
+      const totalSec = Math.floor(sec);
+      const hours = Math.floor(totalSec / 3600);
+      const mins = Math.floor((totalSec % 3600) / 60);
+      const secs = totalSec % 60;
+      if (hours > 0) {
+        return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      }
+      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function seekVideo(secondsDelta) {
+      if (!engine || !engine.video) return;
+      if (engine.video.duration && isFinite(engine.video.duration)) {
+        engine.video.currentTime = Math.max(0, Math.min(engine.video.duration, engine.video.currentTime + secondsDelta));
+        engine.updateTimeAndSeekBar();
+      }
+    }
+
+    function handleSeekBarClick(e) {
+      if (!engine || !engine.video || !engine.video.duration || !isFinite(engine.video.duration)) return;
+      const container = document.getElementById('seek-bar-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const percent = Math.max(0, Math.min(1, clickX / rect.width));
+      engine.video.currentTime = percent * engine.video.duration;
+      engine.updateTimeAndSeekBar();
+    }
+
+    window.seekVideo = seekVideo;
+    window.handleSeekBarClick = handleSeekBarClick;
+
+    window.addEventListener('click', () => {
+      const popSub = document.getElementById('popover-subtitles');
+      const popAud = document.getElementById('popover-audio');
+      if (popSub) popSub.classList.add('hidden');
+      if (popAud) popAud.classList.add('hidden');
+    });
 
     /**
      * Record channel play events to build intelligent user profile suggestions
@@ -2311,32 +2986,40 @@
 
     async function loadM3uPlaylist(rawInput, isBackground = false, defaultLanguage = null) {
       if (!rawInput) return;
-      const urls = String(rawInput)
-        .split(/[\r\n\s]+/)
-        .map(u => u.trim())
-        .filter(u => u.startsWith('http://') || u.startsWith('https://'));
+      const lines = String(rawInput)
+        .split(/[\r\n]+/)
+        .map(l => l.trim())
+        .filter(Boolean);
 
-      if (urls.length === 0) return;
+      if (lines.length === 0) return;
 
-      if (urls.length > 1) {
-        if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, `Importing ${urls.length} M3U Playlists...`);
-        let importedTotal = 0;
-        for (let i = 0; i < urls.length; i++) {
-          if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, `Parsing Feed ${i + 1}/${urls.length}...`);
-          try {
-            await loadM3uSinglePlaylist(urls[i], true, defaultLanguage);
+      if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, `Processing ${lines.length} IPTV source lines...`);
+      let importedTotal = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!isBackground && !state.isRemoteClient) engine.showSpinner(true, `Processing Line ${i + 1}/${lines.length}...`);
+        
+        try {
+          // Check if line is space-separated Xtream Codes format: "http://host:port user pass"
+          const parts = line.split(/\s+/);
+          if (parts.length >= 3 && parts[0].startsWith('http')) {
+            const count = await xtreamConnector.fetchXtreamPlaylist(parts[0], parts[1], parts[2]);
+            if (count > 0) importedTotal++;
+          } else if (line.startsWith('http://') || line.startsWith('https://')) {
+            await loadM3uSinglePlaylist(line, true, defaultLanguage);
             importedTotal++;
-          } catch (e) {}
+          }
+        } catch (e) {
+          console.warn(`Error processing line [${line}]:`, e.message);
         }
-        if (!isBackground && !state.isRemoteClient) {
-          engine.showSpinner(false);
-          closeModals();
-          alert(`Batch Import Completed!\nSuccessfully parsed ${importedTotal}/${urls.length} feeds.\nTotal Active Channels: ${state.channels.length.toLocaleString()}`);
-        }
-        return;
       }
 
-      return await loadM3uSinglePlaylist(urls[0], isBackground, defaultLanguage);
+      if (!isBackground && !state.isRemoteClient) {
+        engine.showSpinner(false);
+        closeModals();
+        alert(`Batch Import Completed!\nProcessed ${importedTotal}/${lines.length} sources successfully.\nTotal Active Channels: ${state.channels.length.toLocaleString()}`);
+      }
     }
 
     async function loadM3uSinglePlaylist(url, isBackground = false, defaultLanguage = null) {
@@ -2346,17 +3029,17 @@
       try {
         let content = "";
         try {
-          const resp = await fetch(url, { headers: { 'Accept': '*/*' } });
-          if (resp.ok) content = await resp.text();
-        } catch (e) {}
-
-        if (!content || !content.includes('#EXTM3U')) {
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-          const proxyResp = await fetch(proxyUrl);
-          if (proxyResp.ok) content = await proxyResp.text();
+          content = await fetchWithProxyFallback(url);
+        } catch (e) {
+          console.warn('Proxy fetch failed in loadM3uSinglePlaylist for:', url, e.message);
         }
 
         if (!content || (!content.includes('#EXTINF') && !content.includes('#EXTM3U'))) {
+          // If URL contains username/password, fallback to Xtream Connector!
+          if (url.includes('username=') && url.includes('password=')) {
+            const count = await xtreamConnector.fetchXtreamPlaylist(url);
+            if (count > 0) return count;
+          }
           quarantineManager.quarantine(url, "INVALID_PLAYLIST_HEADER", url);
           throw new Error('Invalid M3U playlist format');
         }
@@ -2416,9 +3099,12 @@
             renderRemoteChannelsList();
             renderRemoteFavsList();
           }
+
+          return acceptedCount;
         }
       } catch (err) {
         if (!isBackground && !state.isRemoteClient) engine.showSpinner(false);
+        throw err;
       }
     }
 
@@ -2498,19 +3184,36 @@
           if (currentInfo) {
             currentInfo.url = line;
             currentInfo.id = generateChannelId(currentInfo.name, currentInfo.url);
-            currentInfo.program = currentInfo.group ? `${currentInfo.group} Live Stream` : "Broadcast Program";
+            currentInfo.program = currentInfo.group ? `${currentInfo.group}` : "Broadcast Program";
+
+            const lowerUrl = line.toLowerCase();
+            const lowerGrp = (currentInfo.group || '').toLowerCase();
+            let type = 'live';
+            if (lowerUrl.includes('/series/') || lowerGrp.includes('series') || lowerGrp.includes('season')) {
+              type = 'series';
+            } else if (lowerUrl.includes('/movie/') || lowerGrp.includes('vod') || lowerGrp.includes('movie') || /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(lowerUrl)) {
+              type = 'vod';
+            }
+            currentInfo.type = type;
+
             results.push(currentInfo);
             currentInfo = null;
           } else {
             // URL line without #EXTINF header
             const standaloneName = `Stream ${results.length + 1}`;
+            const lowerUrl = line.toLowerCase();
+            let type = 'live';
+            if (lowerUrl.includes('/series/')) type = 'series';
+            else if (lowerUrl.includes('/movie/') || /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(lowerUrl)) type = 'vod';
+
             const standaloneCh = {
               id: generateChannelId(standaloneName, line),
               name: standaloneName,
               url: line,
+              type: type,
               language: defaultLanguage || inferChannelLanguage(standaloneName),
-              group: 'Imported',
-              program: 'Live Stream'
+              group: type === 'series' ? 'TV Series' : (type === 'vod' ? 'VOD Movies' : 'Imported'),
+              program: 'Stream'
             };
             results.push(standaloneCh);
           }
@@ -3266,20 +3969,28 @@
         });
       };
 
+      window.xtreamConnector = xtreamConnector;
+      window.openSeriesExplorer = openSeriesExplorer;
+      window.state = state;
+
       window.connectXtreamApi = async function() {
         const host = document.getElementById('input-xtream-host')?.value.trim();
         const user = document.getElementById('input-xtream-user')?.value.trim();
         const pass = document.getElementById('input-xtream-pass')?.value.trim();
-        if (!host || !user || !pass) {
-          alert('Please enter Host, Username, and Password for Xtream API.');
+        
+        const { host: cleanHost, username: cleanUser, password: cleanPass } = parseXtreamInput(host, user, pass);
+
+        if (!cleanHost || (!cleanUser && !user) || (!cleanPass && !pass)) {
+          alert('Please enter Host, Username, and Password for Xtream API (or paste a full get.php URL in Host).');
           return;
         }
+
         engine.showSpinner(true, 'Connecting to Xtream API...');
         try {
-          const count = await xtreamConnector.fetchXtreamPlaylist(host, user, pass);
+          const count = await xtreamConnector.fetchXtreamPlaylist(cleanHost, cleanUser, cleanPass);
           engine.showSpinner(false);
           closeM3uModal();
-          alert(`Successfully imported ${count} streams from Xtream API!`);
+          alert(`Successfully imported ${count.toLocaleString()} streams from Xtream API!`);
         } catch (e) {
           engine.showSpinner(false);
           alert(`Xtream API Error: ${e.message}`);
@@ -3356,9 +4067,13 @@
       }
 
       window.addEventListener('keydown', (e) => {
-        if (state.isRemoteClient || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        if (state.isRemoteClient || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+        
+        const hasFiniteDuration = video && video.duration && isFinite(video.duration) && video.duration > 0;
+
         switch (e.code) {
           case 'Space':
+          case 'KeyK':
             e.preventDefault();
             togglePlayPause();
             break;
@@ -3369,16 +4084,38 @@
             if (video) video.muted = !video.muted;
             break;
           case 'ArrowUp':
+            e.preventDefault();
             if (video) video.volume = Math.min(1, video.volume + 0.05);
             break;
           case 'ArrowDown':
+            e.preventDefault();
             if (video) video.volume = Math.max(0, video.volume - 0.05);
             break;
           case 'ArrowRight':
+            e.preventDefault();
+            if (hasFiniteDuration) {
+              seekVideo(10);
+            } else if (state.currentChannelIndex < state.filteredChannels.length - 1) {
+              playChannel(state.currentChannelIndex + 1);
+            }
+            break;
+          case 'ArrowLeft':
+            e.preventDefault();
+            if (hasFiniteDuration) {
+              seekVideo(-10);
+            } else if (state.currentChannelIndex > 0) {
+              playChannel(state.currentChannelIndex - 1);
+            }
+            break;
+          case 'KeyL':
+            seekVideo(10);
+            break;
+          case 'KeyJ':
+            seekVideo(-10);
+            break;
           case 'KeyN':
             if (state.currentChannelIndex < state.filteredChannels.length - 1) playChannel(state.currentChannelIndex + 1);
             break;
-          case 'ArrowLeft':
           case 'KeyP':
             if (state.currentChannelIndex > 0) playChannel(state.currentChannelIndex - 1);
             break;
