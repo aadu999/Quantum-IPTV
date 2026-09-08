@@ -302,7 +302,7 @@
 
             <!-- Current Channel Indicator -->
             <div class="hidden sm:flex items-center gap-2 border-l border-slate-800 pl-3">
-              <img id="current-ch-logo" src="" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-5 h-5 rounded object-contain bg-slate-800 p-0.5 border border-slate-700">
+              <img id="current-ch-logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath fill='%23ffffff' d='M10 8l6 4-6 4V8z'/%3E%3C/svg%3E" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-5 h-5 rounded object-contain bg-slate-800 p-0.5 border border-slate-700">
               <div class="flex flex-col">
                 <span id="current-ch-name" class="font-semibold text-white truncate max-w-[140px] md:max-w-[200px]">Select a Channel</span>
                 <span id="current-ch-epg" class="text-[10px] text-brand-400 truncate max-w-[140px] md:max-w-[200px]">Live Broadcast</span>
@@ -520,7 +520,7 @@
       <!-- Currently Playing Card on TV -->
       <div class="w-full bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-lg">
         <div class="flex items-center gap-3 overflow-hidden">
-          <img id="remote-now-logo" src="" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+          <img id="remote-now-logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath fill='%23ffffff' d='M10 8l6 4-6 4V8z'/%3E%3C/svg%3E" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
           <div class="overflow-hidden text-left">
             <div id="remote-now-channel" data-id="" class="text-xs font-bold text-white truncate">Asianet News</div>
             <div id="remote-now-prog" class="text-[10px] text-brand-400 truncate">Live Satellite Broadcast</div>
@@ -1230,7 +1230,7 @@
       if (!channel) return;
 
       if (currentChName) currentChName.textContent = channel.name;
-      if (currentChLogo) currentChLogo.src = channel.logo || '';
+      if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
       if (currentChEpg) currentChEpg.textContent = channel.program || "Live Stream";
 
       engine.load(channel.url);
@@ -1320,7 +1320,7 @@
         favoritesListContainer.innerHTML = favChannels.map(ch => `
           <div onclick="tuneToChannel({ id: '${ch.id}', url: '${ch.url}', name: '${ch.name}' })" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition">
             <div class="flex items-center gap-2.5 overflow-hidden">
-              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-6 h-6 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-6 h-6 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
               <div class="overflow-hidden">
                 <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
                 <div class="text-[10px] text-slate-400 truncate">${ch.group || 'Live'}</div>
@@ -1392,7 +1392,7 @@
         return `
           <div onclick="playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${isActive ? 'bg-brand-950/60 border-l-4 border-brand-500 pl-2' : ''}">
             <div class="flex items-center gap-2.5 overflow-hidden">
-              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-7 h-7 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-7 h-7 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
               <div class="overflow-hidden">
                 <div class="text-xs font-semibold ${isActive ? 'text-brand-400' : 'text-slate-200'} truncate flex items-center gap-1.5">
                   <span>${ch.name}</span>
@@ -1812,7 +1812,7 @@
         remName.setAttribute('data-url', data.channelUrl || '');
       }
       if (remProg && data.program) remProg.textContent = data.program;
-      if (remLogo && data.channelLogo) remLogo.src = data.channelLogo;
+      if (remLogo) remLogo.src = data.channelLogo || FALLBACK_LOGO;
       
       if (data.favorites && Array.isArray(data.favorites)) {
         state.favorites = data.favorites;
@@ -1941,7 +1941,7 @@
         return `
           <div onclick="sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition">
             <div class="flex items-center gap-3 overflow-hidden">
-              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
               <div class="text-left overflow-hidden">
                 <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
                 <div class="text-[10px] text-slate-400">${ch.country || 'TV'} · ${ch.group || 'Live Stream'}</div>
@@ -1986,7 +1986,7 @@
         return `
           <div onclick="sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition">
             <div class="flex items-center gap-3 overflow-hidden">
-              <img src="${ch.logo}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+              <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
               <div class="text-left overflow-hidden">
                 <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
                 <div class="text-[10px] text-slate-400">${ch.group || 'Live Stream'}</div>
