@@ -3288,7 +3288,8 @@
       if (navigator.vibrate) {
         try { navigator.vibrate(35); } catch(e) {}
       }
-      const cmd = { action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
+      const msgId = `${action}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const cmd = { msgId, action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
 
       if (broadcastChan) broadcastChan.postMessage(cmd);
       if (mqttClient && mqttClient.connected) {
@@ -3320,10 +3321,36 @@
       }
     }
 
+    const processedRemoteMsgIds = new Set();
+    let lastRemoteCmdAction = null;
+    let lastRemoteCmdTime = 0;
+
     function handleIncomingRemoteCommand(msg) {
       if (!msg || !msg.action || state.isRemoteClient) return;
 
-      closeModals();
+      // 1. Deduplicate by unique message ID across BroadcastChannel and MQTT
+      if (msg.msgId) {
+        if (processedRemoteMsgIds.has(msg.msgId)) return;
+        processedRemoteMsgIds.add(msg.msgId);
+        if (processedRemoteMsgIds.size > 100) {
+          const firstKey = processedRemoteMsgIds.values().next().value;
+          processedRemoteMsgIds.delete(firstKey);
+        }
+      }
+
+      // 2. Throttle identical action commands sent within 300ms window (avoids double play/pause toggle)
+      const now = Date.now();
+      if (msg.action === lastRemoteCmdAction && (now - lastRemoteCmdTime) < 300) {
+        console.warn(`Throttling duplicate remote action: ${msg.action}`);
+        return;
+      }
+      lastRemoteCmdAction = msg.action;
+      lastRemoteCmdTime = now;
+
+      // Only close modals for specific modal-closing actions
+      if (['FULLSCREEN', 'TUNE_CHANNEL'].includes(msg.action)) {
+        closeModals();
+      }
 
       switch (msg.action) {
         case 'REQUEST_SYNC':
