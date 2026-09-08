@@ -909,7 +909,12 @@
             if (data.fatal) {
               switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
-                  this.hls.startLoad();
+                  this.retryCount = (this.retryCount || 0) + 1;
+                  if (this.retryCount <= 2) {
+                    this.hls.startLoad();
+                  } else {
+                    this.fallbackToProxy();
+                  }
                   break;
                 case Hls.ErrorTypes.MEDIA_ERROR:
                   this.hls.recoverMediaError();
@@ -949,17 +954,25 @@
         if (state.isRemoteClient) return;
         this.showSpinner(true, "Buffering Stream...");
         this.stallCount = 0;
+        this.retryCount = 0;
+        this.proxyTried = false;
+
+        let targetUrl = url;
+        // If app is served over HTTPS and stream is plain HTTP, auto-proxy via SSL wrapper to bypass Mixed Content blocking
+        if (window.location.protocol === 'https:' && targetUrl.startsWith('http://')) {
+          targetUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        }
 
         if (this.hls && Hls.isSupported()) {
-          this.hls.loadSource(url);
+          this.hls.loadSource(targetUrl);
         } else if (this.video && this.video.canPlayType('application/vnd.apple.mpegurl')) {
-          this.video.src = url;
+          this.video.src = targetUrl;
           this.video.addEventListener('loadedmetadata', () => {
             this.showSpinner(false);
             this.attemptAutoplay();
           }, { once: true });
         } else if (this.video) {
-          this.video.src = url;
+          this.video.src = targetUrl;
           this.attemptAutoplay();
         }
       }
@@ -967,9 +980,21 @@
       fallbackToProxy() {
         const curCh = state.filteredChannels[state.currentChannelIndex];
         if (!curCh) return;
-        if (!curCh.url.includes('corsproxy.io')) {
-          const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
-          if (this.hls) this.hls.loadSource(proxiedUrl);
+        
+        let proxiedUrl;
+        if (!this.proxyTried) {
+          this.proxyTried = true;
+          proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(curCh.url)}`;
+        } else {
+          proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(curCh.url)}`;
+        }
+
+        if (this.hls) {
+          this.hls.loadSource(proxiedUrl);
+          this.hls.startLoad();
+        } else if (this.video) {
+          this.video.src = proxiedUrl;
+          this.video.play().catch(() => {});
         }
       }
 
