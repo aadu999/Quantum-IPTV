@@ -436,6 +436,7 @@
           </select>
           <select id="category-filter" class="w-full bg-slate-800 text-slate-300 text-[11px] rounded-md px-1.5 py-1.5 border border-slate-700/70 focus:outline-none focus:border-brand-500 truncate">
             <option value="ALL">All Categories</option>
+            <option value="Live Movies">Live Movies</option>
             <option value="News">News</option>
             <option value="Entertainment">Entertainment</option>
             <option value="Sports">Sports</option>
@@ -1607,6 +1608,7 @@
       }
 
       fuseChannel(channelObj, sourceName = 'Default Playlist') {
+        if (typeof sanitizeChannel === 'function') sanitizeChannel(channelObj);
         const normTitle = deduplicator.normalizeTitle(channelObj.name);
         const typePrefix = channelObj.type || 'live';
         const key = `${typePrefix}:${channelObj.tvgId ? channelObj.tvgId.toLowerCase() : (normTitle || channelObj.url)}`;
@@ -3338,6 +3340,29 @@
       return null;
     }
 
+    function sanitizeChannel(ch) {
+      if (!ch) return ch;
+      const url = (ch.url || '').toLowerCase();
+      const grp = (ch.group || '').toLowerCase();
+
+      const isLiveStreamUrl = url.endsWith('.m3u8') || url.endsWith('.ts') || url.includes('/live/') || url.includes('get.php') || url.includes('iptv-org.github.io') || url.includes('akamaized.net') || url.includes('cloudfront.net') || url.includes('stream') || url.includes('master');
+      const isVodUrl = url.includes('/movie/') || (/\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(url) && !isLiveStreamUrl);
+      const isSeriesUrl = url.includes('/series/');
+
+      if (isVodUrl) {
+        ch.type = 'vod';
+      } else if (isSeriesUrl) {
+        ch.type = 'series';
+      } else {
+        ch.type = 'live';
+      }
+
+      if (ch.type === 'live' && (grp === 'movies' || grp === 'movie' || grp.includes('movie'))) {
+        ch.group = 'Live Movies';
+      }
+      return ch;
+    }
+
     function parseM3U(m3uText, defaultLanguage = null, sourceUrl = '') {
       if (!m3uText) return [];
       const cleanText = m3uText.replace(/^\uFEFF/, '');
@@ -3389,42 +3414,21 @@
             currentInfo.id = generateChannelId(currentInfo.name, currentInfo.url);
             currentInfo.program = currentInfo.group ? `${currentInfo.group}` : "Broadcast Program";
 
-            const lowerUrl = line.toLowerCase();
-            const lowerGrp = (currentInfo.group || '').toLowerCase();
-            let type = 'live';
-
-            const isLiveStreamExt = lowerUrl.endsWith('.m3u8') || lowerUrl.endsWith('.ts') || lowerUrl.includes('/live/') || lowerUrl.includes('get.php');
-
-            if (lowerUrl.includes('/series/')) {
-              type = 'series';
-            } else if (lowerUrl.includes('/movie/') || (lowerGrp.startsWith('vod') && !isLiveStreamExt) || (/\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(lowerUrl) && !isLiveStreamExt)) {
-              type = 'vod';
-            } else if ((lowerGrp.startsWith('series') || lowerGrp.includes('seasons')) && !isLiveStreamExt) {
-              type = 'series';
-            } else {
-              type = 'live';
-            }
-            currentInfo.type = type;
-
+            sanitizeChannel(currentInfo);
             results.push(currentInfo);
             currentInfo = null;
           } else {
             // URL line without #EXTINF header
             const standaloneName = `Stream ${results.length + 1}`;
-            const lowerUrl = line.toLowerCase();
-            let type = 'live';
-            if (lowerUrl.includes('/series/')) type = 'series';
-            else if (lowerUrl.includes('/movie/') || /\.(mp4|mkv|avi|mov)(\?.*)?$/i.test(lowerUrl)) type = 'vod';
-
-            const standaloneCh = {
+            const standaloneCh = sanitizeChannel({
               id: generateChannelId(standaloneName, line),
               name: standaloneName,
               url: line,
-              type: type,
+              type: 'live',
               language: defaultLanguage || inferChannelLanguage(standaloneName),
-              group: type === 'series' ? 'TV Series' : (type === 'vod' ? 'VOD Movies' : 'Imported'),
+              group: 'Imported',
               program: 'Stream'
-            };
+            });
             results.push(standaloneCh);
           }
         } else if (!line.startsWith('#')) {
@@ -4571,8 +4575,9 @@
       // Load offline static bundle fallback if offline
       const cached = QuantumOfflineCache.loadBundle();
       if (cached && cached.channels && cached.channels.length > 0) {
-        state.channels = cached.channels;
-        state.filteredChannels = cached.channels;
+        const sanitized = cached.channels.map(ch => sanitizeChannel(ch));
+        state.channels = sanitized;
+        state.filteredChannels = sanitized;
       }
       checkAndLaunchRemoteView();
       setupEventListeners();
