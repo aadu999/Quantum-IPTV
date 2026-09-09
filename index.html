@@ -2777,26 +2777,29 @@
     let isSeriesExpanded = false;
     let currentSeriesInfoCache = null;
 
-    function playChannel(index) {
+    function playChannel(index, options = {}) {
       if (state.isRemoteClient) return;
       if (index < 0 || index >= state.filteredChannels.length) return;
       state.currentChannelIndex = index;
       const channel = state.filteredChannels[index];
       if (!channel) return;
 
-      if (channel.type === 'series' || (channel.url && channel.url.includes('/series/'))) {
-        openSeriesExplorer(channel);
-        return;
+      if (!options.directPlay) {
+        if (channel.type === 'series' || (channel.url && channel.url.includes('/series/'))) {
+          openSeriesExplorer(channel);
+          return;
+        }
+
+        if (channel.type === 'vod' || (channel.url && channel.url.includes('/movie/'))) {
+          openMovieExplorer(channel);
+          return;
+        }
       }
 
-      if (channel.type === 'vod' || (channel.url && channel.url.includes('/movie/'))) {
-        openMovieExplorer(channel);
-        return;
-      }
-
+      closeModals();
       if (currentChName) currentChName.textContent = channel.name;
       if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
-      if (currentChEpg) currentChEpg.textContent = channel.program || "Live Stream";
+      if (currentChEpg) currentChEpg.textContent = channel.program || channel.group || "Live Stream";
 
       recordUserInteraction(channel);
       QuantumSessionStore.saveSession({
@@ -3202,6 +3205,8 @@
     function tuneToChannel(target) {
       if (!target || state.isRemoteClient) return;
 
+      closeModals();
+
       let idx = state.channels.findIndex(ch => 
         (target.id && ch.id === target.id) || 
         (target.url && ch.url === target.url) || 
@@ -3217,7 +3222,8 @@
           logo: target.logo || '',
           group: target.group || 'Live',
           country: target.country || 'TV',
-          program: target.program || 'Live Satellite Broadcast'
+          program: target.program || 'Live Satellite Broadcast',
+          type: target.type || 'live'
         };
         state.channels.push(newCh);
         state.filteredChannels = [...state.channels];
@@ -3226,7 +3232,7 @@
 
       if (idx !== -1) {
         state.filteredChannels = [...state.channels];
-        playChannel(idx);
+        playChannel(idx, { directPlay: true });
       }
     }
 
@@ -3789,6 +3795,7 @@
           if (!event.data) return;
           if (state.isRemoteClient) {
             if (event.data.action === 'SYNC_STATE') updateRemoteStateView(event.data.payload);
+            if (event.data.action === 'SYNC_CATALOG') handleIncomingCatalogSync(event.data.payload);
           } else {
             handleIncomingRemoteCommand(event.data);
           }
@@ -3808,15 +3815,18 @@
           mqttClient.on('connect', () => {
             const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
             const stateTopic = `quantum_tv/${state.roomId}/state`;
+            const catalogTopic = `quantum_tv/${state.roomId}/catalog`;
 
             if (state.isRemoteClient) {
               mqttClient.subscribe(stateTopic);
+              mqttClient.subscribe(catalogTopic);
               const statEl = document.getElementById('remote-conn-status');
               if (statEl) statEl.textContent = 'Connected to TV';
               sendRemoteCmd('REQUEST_SYNC');
             } else {
               mqttClient.subscribe(cmdTopic);
               broadcastTVState();
+              broadcastTVCatalog();
             }
           });
 
@@ -3825,6 +3835,7 @@
               const data = JSON.parse(payload.toString());
               if (state.isRemoteClient) {
                 if (topic.endsWith('/state')) updateRemoteStateView(data);
+                if (topic.endsWith('/catalog')) handleIncomingCatalogSync(data);
               } else {
                 if (topic.endsWith('/cmd')) handleIncomingRemoteCommand(data);
               }
@@ -3871,6 +3882,45 @@
       }
     }
 
+    function broadcastTVCatalog() {
+      if (state.isRemoteClient) return;
+
+      const session = QuantumSessionStore.loadSession();
+      const catalogData = {
+        channels: state.channels ? state.channels.slice(0, 5000) : [],
+        session: session
+      };
+
+      if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_CATALOG', payload: catalogData });
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(`quantum_tv/${state.roomId}/catalog`, JSON.stringify(catalogData));
+      }
+    }
+
+    function handleIncomingCatalogSync(payload) {
+      if (!payload) return;
+
+      if (Array.isArray(payload.channels) && payload.channels.length > 0) {
+        state.channels = payload.channels;
+        state.filteredChannels = [...state.channels];
+        QuantumSessionStore.saveChannels(state.channels);
+      }
+
+      if (payload.session) {
+        if (payload.session.xtreamHost) {
+          state.lastXtreamHost = payload.session.xtreamHost;
+          state.lastXtreamUser = payload.session.xtreamUser;
+          state.lastXtreamPass = payload.session.xtreamPass;
+        }
+        QuantumSessionStore.saveSession(payload.session);
+      }
+
+      if (state.isRemoteClient) {
+        renderRemoteChannelsList();
+        renderRemoteFavsList();
+      }
+    }
+
     const processedRemoteMsgIds = new Set();
     let lastRemoteCmdAction = null;
     let lastRemoteCmdTime = 0;
@@ -3905,6 +3955,7 @@
       switch (msg.action) {
         case 'REQUEST_SYNC':
           broadcastTVState();
+          broadcastTVCatalog();
           // Auto-close QR code remote pairing modal when mobile device connects
           const remoteModal = document.getElementById('modal-remote');
           if (remoteModal && !remoteModal.classList.contains('hidden')) {
@@ -4617,6 +4668,13 @@
             }, 150);
           });
         }
+
+        const savedChannels = QuantumSessionStore.loadChannels();
+        if (savedChannels && savedChannels.length > 0) {
+          state.channels = savedChannels;
+          state.filteredChannels = [...state.channels];
+        }
+        renderRemoteChannelsList();
       }
     }
 
@@ -5008,6 +5066,7 @@
             engine.showToast(`Imported ${count.toLocaleString()} streams from Xtream API!`, 'success');
           }
           broadcastTVState();
+          broadcastTVCatalog();
           return count;
         } catch (e) {
           if (typeof engine !== 'undefined') engine.showSpinner(false);
