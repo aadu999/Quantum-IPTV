@@ -25,7 +25,29 @@ export function isFullscreenActive(): boolean {
 }
 
 let controlsIdleTimer: any = null;
+let hudAutoTimer: any = null;
 const CONTROLS_HIDE_DELAY = 2500;
+
+export function showEngineHud(visible: boolean, autoHideMs = 0): void {
+  const hud = document.getElementById('engine-hud');
+  if (!hud || state.isRemoteClient) return;
+
+  if (hudAutoTimer) {
+    clearTimeout(hudAutoTimer);
+    hudAutoTimer = null;
+  }
+
+  if (visible) {
+    hud.classList.remove('opacity-0', 'pointer-events-none', '-translate-y-2');
+    if (autoHideMs > 0) {
+      hudAutoTimer = setTimeout(() => {
+        hud.classList.add('opacity-0', 'pointer-events-none', '-translate-y-2');
+      }, autoHideMs);
+    }
+  } else {
+    hud.classList.add('opacity-0', 'pointer-events-none', '-translate-y-2');
+  }
+}
 
 export function wakeControls(): void {
   const videoStage = document.getElementById('video-stage');
@@ -33,6 +55,11 @@ export function wakeControls(): void {
   if (!videoStage || state.isRemoteClient) return;
 
   videoStage.classList.remove('fullscreen-idle');
+
+  // Briefly reveal engine HUD if controls are awakened during playback
+  if (video && !video.paused) {
+    showEngineHud(true, 3000);
+  }
 
   if (controlsIdleTimer) {
     clearTimeout(controlsIdleTimer);
@@ -291,4 +318,5 @@ export function adjustMobileVideoStage(): void {
 (window as any).playNextWorkingChannel = playNextWorkingChannel;
 (window as any).showTvVolumeHud = showTvVolumeHud;
 (window as any).adjustMobileVideoStage = adjustMobileVideoStage;
+(window as any).showEngineHud = showEngineHud;
 

@@ -16,17 +16,54 @@ export function setModalEngineInstance(engine: QuantumStreamEngine): void {
   engineInstance = engine;
 }
 
+export function closeRemoteModal(): void {
+  const modal = document.getElementById('modal-remote');
+  if (modal) modal.classList.add('hidden');
+}
+
+export function closeM3uModal(): void {
+  const modal = document.getElementById('modal-m3u');
+  if (modal) modal.classList.add('hidden');
+}
+
 export function closeModals(): void {
-  const modalRemote = document.getElementById('modal-remote');
-  const modalM3u = document.getElementById('modal-m3u');
-  const modalQuarantine = document.getElementById('modal-quarantine');
-  const modalSeries = document.getElementById('modal-series-explorer');
-  const modalMovie = document.getElementById('modal-movie-explorer');
-  if (modalRemote) modalRemote.classList.add('hidden');
-  if (modalM3u) modalM3u.classList.add('hidden');
-  if (modalQuarantine) modalQuarantine.classList.add('hidden');
-  if (modalSeries) modalSeries.classList.add('hidden');
-  if (modalMovie) modalMovie.classList.add('hidden');
+  closeRemoteModal();
+  closeM3uModal();
+  closeQuarantineModal();
+  closeSeriesExplorer();
+  closeMovieExplorer();
+  const modalRemoteMovie = document.getElementById('modal-remote-movie-explorer');
+  const modalRemoteSeries = document.getElementById('modal-remote-series-explorer');
+  if (modalRemoteMovie) modalRemoteMovie.classList.add('hidden');
+  if (modalRemoteSeries) modalRemoteSeries.classList.add('hidden');
+  const modalAppDialog = document.getElementById('modal-app-dialog');
+  if (modalAppDialog) modalAppDialog.classList.add('hidden');
+}
+
+// Global backdrop click dismissal and Escape key handling
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target) return;
+    const modalIds = [
+      'modal-remote',
+      'modal-m3u',
+      'modal-quarantine',
+      'modal-series-explorer',
+      'modal-movie-explorer',
+      'modal-remote-movie-explorer',
+      'modal-remote-series-explorer'
+    ];
+    if (modalIds.includes(target.id)) {
+      target.classList.add('hidden');
+    }
+  });
+
+  window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      closeModals();
+    }
+  });
 }
 
 export async function openSeriesExplorer(channel: Channel): Promise<void> {
@@ -487,6 +524,8 @@ export function copyToClipboard(text: string): void {
 
 // Global window mappings for DOM onClick handlers
 (window as any).closeModals = closeModals;
+(window as any).closeRemoteModal = closeRemoteModal;
+(window as any).closeM3uModal = closeM3uModal;
 (window as any).openSeriesExplorer = openSeriesExplorer;
 (window as any).closeSeriesExplorer = closeSeriesExplorer;
 (window as any).toggleSeriesExpandView = toggleSeriesExpandView;

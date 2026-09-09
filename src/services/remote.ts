@@ -3,6 +3,7 @@ import { state, FALLBACK_LOGO } from '../state/store';
 import { QuantumSessionStore } from '../state/session';
 import { parseXtreamInput, getXtreamCredentials, xtreamConnector } from './xtream';
 import { formatTimestamp } from '../ui/controls';
+import { showAppAlert } from '../ui/dialog';
 
 declare const mqtt: any;
 declare const QRCode: any;
@@ -12,6 +13,14 @@ const broadcastChan =
   typeof window !== 'undefined' && window.BroadcastChannel
     ? new BroadcastChannel(`quantum_iptv_${state.roomId}`)
     : null;
+
+export function dismissRemoteModalOnConnect(): void {
+  const remoteModal = document.getElementById('modal-remote');
+  if (remoteModal && !remoteModal.classList.contains('hidden')) {
+    remoteModal.classList.add('hidden');
+    (window as any).engine?.showToast?.('📱 Quant TV Remote Connected!', 'success');
+  }
+}
 
 export function initRemoteSync(): void {
   if (broadcastChan) {
@@ -24,6 +33,12 @@ export function initRemoteSync(): void {
         handleIncomingRemoteCommand(event.data);
       }
     };
+  }
+
+  // If we are the remote client, send immediate announcement via local channel
+  if (state.isRemoteClient) {
+    sendRemoteCmd('REMOTE_JOINED', { agent: navigator.userAgent });
+    sendRemoteCmd('REQUEST_SYNC');
   }
 
   try {
@@ -40,15 +55,19 @@ export function initRemoteSync(): void {
         const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
         const stateTopic = `quantum_tv/${state.roomId}/state`;
         const catalogTopic = `quantum_tv/${state.roomId}/catalog`;
+        const presenceTopic = `quantum_tv/${state.roomId}/presence`;
 
         if (state.isRemoteClient) {
           mqttClient.subscribe(stateTopic);
           mqttClient.subscribe(catalogTopic);
           const statEl = document.getElementById('remote-conn-status');
           if (statEl) statEl.textContent = 'Connected to TV';
+          mqttClient.publish(presenceTopic, JSON.stringify({ event: 'connected', sender: 'remote', roomId: state.roomId, time: Date.now() }));
+          sendRemoteCmd('REMOTE_JOINED');
           sendRemoteCmd('REQUEST_SYNC');
         } else {
           mqttClient.subscribe(cmdTopic);
+          mqttClient.subscribe(presenceTopic);
           broadcastTVState();
           broadcastTVCatalog();
         }
@@ -61,7 +80,13 @@ export function initRemoteSync(): void {
             if (topic.endsWith('/state')) updateRemoteStateView(data);
             if (topic.endsWith('/catalog')) handleIncomingCatalogSync(data);
           } else {
-            if (topic.endsWith('/cmd')) handleIncomingRemoteCommand(data);
+            if (topic.endsWith('/presence')) {
+              dismissRemoteModalOnConnect();
+              broadcastTVState();
+              broadcastTVCatalog();
+            } else if (topic.endsWith('/cmd')) {
+              handleIncomingRemoteCommand(data);
+            }
           }
         } catch (e) {}
       });
@@ -190,6 +215,17 @@ let lastRemoteCmdTime = 0;
 export function handleIncomingRemoteCommand(msg: any): void {
   if (!msg || !msg.action || state.isRemoteClient) return;
 
+  if (msg.roomId && state.roomId && msg.roomId !== state.roomId) {
+    return;
+  }
+
+  // Any incoming message or connection from remote immediately dismisses QR modal on TV
+  dismissRemoteModalOnConnect();
+
+  if (['FULLSCREEN', 'TUNE_CHANNEL'].includes(msg.action)) {
+    (window as any).closeModals?.();
+  }
+
   if (msg.msgId) {
     if (processedRemoteMsgIds.has(msg.msgId)) return;
     processedRemoteMsgIds.add(msg.msgId);
@@ -206,22 +242,19 @@ export function handleIncomingRemoteCommand(msg: any): void {
   lastRemoteCmdAction = msg.action;
   lastRemoteCmdTime = now;
 
-  if (['FULLSCREEN', 'TUNE_CHANNEL'].includes(msg.action)) {
-    (window as any).closeModals?.();
-  }
-
   const video = document.getElementById('video-player') as HTMLVideoElement | null;
   const volSlider = document.getElementById('vol-slider') as HTMLInputElement | null;
 
   switch (msg.action) {
-    case 'REQUEST_SYNC':
+    case 'REMOTE_JOINED':
+      dismissRemoteModalOnConnect();
       broadcastTVState();
       broadcastTVCatalog();
-      const remoteModal = document.getElementById('modal-remote');
-      if (remoteModal && !remoteModal.classList.contains('hidden')) {
-        remoteModal.classList.add('hidden');
-        (window as any).engine?.showToast?.('📱 Quant TV Remote Connected!', 'success');
-      }
+      break;
+    case 'REQUEST_SYNC':
+      dismissRemoteModalOnConnect();
+      broadcastTVState();
+      broadcastTVCatalog();
       break;
     case 'PLAY_PAUSE':
     case 'OK':
@@ -653,7 +686,7 @@ export function submitRemoteProviderConfig(): void {
     const user = (document.getElementById('rem-xtream-user') as HTMLInputElement | null)?.value.trim();
     const pass = (document.getElementById('rem-xtream-pass') as HTMLInputElement | null)?.value.trim();
     if (!host) {
-      alert('Please enter a valid Xtream Server Host URL');
+      showAppAlert('Please enter a valid Xtream Server Host URL', { title: 'Configuration Required', type: 'warning' });
       return;
     }
     payload.host = host;
@@ -662,7 +695,7 @@ export function submitRemoteProviderConfig(): void {
   } else if (currentRemoteConfigType === 'm3u') {
     const url = (document.getElementById('rem-m3u-url') as HTMLTextAreaElement | null)?.value.trim();
     if (!url) {
-      alert('Please enter a valid M3U URL or playlist content');
+      showAppAlert('Please enter a valid M3U URL or playlist content', { title: 'Configuration Required', type: 'warning' });
       return;
     }
     payload.url = url;
@@ -670,7 +703,7 @@ export function submitRemoteProviderConfig(): void {
     const url = (document.getElementById('rem-stalker-url') as HTMLInputElement | null)?.value.trim();
     const mac = (document.getElementById('rem-stalker-mac') as HTMLInputElement | null)?.value.trim();
     if (!url) {
-      alert('Please enter a Stalker Portal URL');
+      showAppAlert('Please enter a Stalker Portal URL', { title: 'Configuration Required', type: 'warning' });
       return;
     }
     payload.url = url;
@@ -678,7 +711,7 @@ export function submitRemoteProviderConfig(): void {
   } else if (currentRemoteConfigType === 'epg') {
     const url = (document.getElementById('rem-epg-url') as HTMLInputElement | null)?.value.trim();
     if (!url) {
-      alert('Please enter an XMLTV EPG URL');
+      showAppAlert('Please enter an XMLTV EPG URL', { title: 'Configuration Required', type: 'warning' });
       return;
     }
     payload.url = url;

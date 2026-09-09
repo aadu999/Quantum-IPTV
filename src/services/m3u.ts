@@ -1,6 +1,7 @@
 import { Channel, ChannelSource } from '../types';
 import { generateChannelId } from '../state/store';
 import { circuitBreaker } from '../player/circuit-breaker';
+import { showAppAlert } from '../ui/dialog';
 
 export function inferChannelLanguage(name = '', tvgId = '', group = ''): string | null {
   const text = `${name} ${tvgId} ${group}`.toLowerCase();
@@ -377,8 +378,9 @@ export async function loadM3uPlaylist(
     if (engine) engine.showSpinner(false);
     (window as any).closeModals?.();
     const channelsCount = (window as any).state?.channels?.length || 0;
-    alert(
-      `Batch Import Completed!\nProcessed ${importedTotal}/${lines.length} sources successfully.\nTotal Active Channels: ${channelsCount.toLocaleString()}`
+    showAppAlert(
+      `Batch Import Completed!\nProcessed ${importedTotal}/${lines.length} sources successfully.\nTotal Active Channels: ${channelsCount.toLocaleString()}`,
+      { title: 'Playlist Import Completed', type: 'success' }
     );
   }
 }

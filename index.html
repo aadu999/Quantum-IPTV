@@ -323,7 +323,7 @@
         </div>
 
         <!-- Diagnostic Stream Telemetry HUD (Hidden on Mobile viewports to conserve screen real estate) -->
-        <div id="engine-hud" class="hidden md:flex flex-col absolute top-4 left-4 z-40 bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-lg p-2 text-[10px] font-mono text-slate-300 shadow-lg pointer-events-none gap-1 max-w-[240px]">
+        <div id="engine-hud" class="hidden md:flex flex-col absolute top-4 left-4 z-40 bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-lg p-2 text-[10px] font-mono text-slate-300 shadow-lg pointer-events-none gap-1 max-w-[240px] transition-all duration-500 transform">
           <div class="flex items-center justify-between text-slate-400">
             <span class="flex items-center gap-1.5 font-bold text-white uppercase tracking-wider">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
@@ -546,8 +546,8 @@
   <!-- Modal: Scannable Remote & QR Code Pairing -->
   <div id="modal-remote" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col items-center text-center relative">
-      <button id="btn-close-remote-modal" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
-        <i class="fa-solid fa-xmark text-sm"></i>
+      <button id="btn-close-remote-modal" onclick="closeRemoteModal()" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark text-sm pointer-events-none"></i>
       </button>
 
       <div class="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-400 text-lg mb-3">
@@ -582,8 +582,8 @@
   <!-- Modal: Enterprise Provider & Playlist Manager -->
   <div id="modal-m3u" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-lg w-full shadow-2xl relative flex flex-col">
-      <button id="btn-close-m3u-modal" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
-        <i class="fa-solid fa-xmark text-sm"></i>
+      <button id="btn-close-m3u-modal" onclick="closeM3uModal()" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark text-sm pointer-events-none"></i>
       </button>
 
       <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -713,7 +713,7 @@
   <div id="modal-quarantine" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-2xl w-full shadow-2xl relative max-h-[85vh] flex flex-col">
       <button id="btn-close-quarantine-modal" onclick="closeQuarantineModal()" class="absolute top-3.5 right-3.5 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
-        <i class="fa-solid fa-xmark text-sm"></i>
+        <i class="fa-solid fa-xmark text-sm pointer-events-none"></i>
       </button>
 
       <div class="flex items-center gap-3 mb-1">
@@ -762,7 +762,7 @@
           
           <!-- Close Modal Button -->
           <button onclick="closeSeriesExplorer()" class="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
-            <i class="fa-solid fa-xmark text-sm"></i>
+            <i class="fa-solid fa-xmark text-sm pointer-events-none"></i>
           </button>
         </div>
       </div>
@@ -850,7 +850,7 @@
         </div>
         
         <button onclick="closeMovieExplorer()" class="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
-          <i class="fa-solid fa-xmark text-sm"></i>
+          <i class="fa-solid fa-xmark text-sm pointer-events-none"></i>
         </button>
       </div>
 
@@ -905,6 +905,24 @@
           </div>
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Custom In-App Alert & Confirmation Dialog -->
+  <div id="modal-app-dialog" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 hidden transition-opacity duration-200">
+    <div id="app-dialog-card" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl relative flex flex-col text-center items-center transition-transform duration-200 scale-95">
+      <button id="app-dialog-btn-close" onclick="closeAppDialog(false)" class="absolute top-3 right-3 text-slate-400 hover:text-white w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark text-sm pointer-events-none"></i>
+      </button>
+      <div id="app-dialog-icon-wrap" class="w-12 h-12 rounded-2xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-400 text-xl mb-3">
+        <i id="app-dialog-icon" class="fa-solid fa-circle-info"></i>
+      </div>
+      <h3 id="app-dialog-title" class="text-base font-bold text-white tracking-tight mb-1">Notification</h3>
+      <p id="app-dialog-message" class="text-xs text-slate-300 leading-relaxed mb-5 whitespace-pre-line max-h-60 overflow-y-auto w-full px-1"></p>
+      <div id="app-dialog-actions" class="flex items-center justify-center gap-2.5 w-full">
+        <button id="app-dialog-btn-cancel" onclick="closeAppDialog(false)" class="hidden flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition">Cancel</button>
+        <button id="app-dialog-btn-confirm" onclick="closeAppDialog(true)" class="flex-1 py-2 px-3 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-xl transition shadow-md shadow-brand-600/30">OK</button>
       </div>
     </div>
   </div>
@@ -1218,7 +1236,7 @@
             <span id="rem-movie-year" class="text-xs text-slate-400">2024</span>
           </div>
           <button onclick="closeRemoteMovieExplorer()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
-            <i class="fa-solid fa-xmark"></i>
+            <i class="fa-solid fa-xmark pointer-events-none"></i>
           </button>
         </div>
         
@@ -1256,7 +1274,7 @@
             <span id="rem-series-year" class="text-xs text-slate-400">2024</span>
           </div>
           <button onclick="closeRemoteSeriesExplorer()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
-            <i class="fa-solid fa-xmark"></i>
+            <i class="fa-solid fa-xmark pointer-events-none"></i>
           </button>
         </div>
 

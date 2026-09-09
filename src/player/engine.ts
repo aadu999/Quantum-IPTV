@@ -148,6 +148,9 @@ export class QuantumStreamEngine {
 
     this.showSpinner(true, 'Buffering Stream...');
     playbackMachine.transition('BUFFERING');
+    try {
+      (window as any).showEngineHud?.(true, 0);
+    } catch (e) {}
 
     let targetUrl = url;
     if (shouldProxy(url) || this.isProxied) {
@@ -251,6 +254,11 @@ export class QuantumStreamEngine {
     try {
       (window as any).adjustMobileVideoStage?.();
     } catch (e) {}
+
+    // Auto-hide HUD engine status 3 seconds after loading finishes and stream starts playing
+    try {
+      (window as any).showEngineHud?.(true, 3000);
+    } catch (e) {}
   }
 
   onStreamFailed(reason = 'Playback error'): void {
@@ -262,6 +270,9 @@ export class QuantumStreamEngine {
       state.offlineChannels.add(curCh.id);
       this.showOfflineOverlay(curCh);
     }
+    try {
+      (window as any).showEngineHud?.(true, 0);
+    } catch (e) {}
   }
 
   attemptAutoplay(): void {

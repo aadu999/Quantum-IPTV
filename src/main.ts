@@ -30,7 +30,8 @@ import {
   updatePlayPauseIcons,
   showTvVolumeHud,
   updateTimeAndSeekBar,
-  adjustMobileVideoStage
+  adjustMobileVideoStage,
+  showEngineHud
 } from './ui/controls';
 import {
   setChannelEngineInstance,
@@ -55,6 +56,7 @@ import {
   switchQuarantineTab,
   copyToClipboard
 } from './ui/modals';
+import { showAppAlert, showAppConfirm, closeAppDialog } from './ui/dialog';
 
 // Instantiate Core Stream Engine
 const videoElement = document.getElementById('video-player') as HTMLVideoElement;
@@ -94,6 +96,11 @@ export function openRemoteModal(): void {
   if (modal) modal.classList.remove('hidden');
 }
 
+export function closeRemoteModal(): void {
+  const modal = document.getElementById('modal-remote');
+  if (modal) modal.classList.add('hidden');
+}
+
 export function setM3uUrl(url: string): void {
   const input = document.getElementById('input-m3u-url') as HTMLInputElement | null;
   if (input) input.value = url;
@@ -129,7 +136,7 @@ export function updateSessionBannerUI(session: any = null): void {
     } else if (activeSession.providerType === 'm3u' && activeSession.customM3uUrl) {
       desc = `M3U URL: ${activeSession.customM3uUrl}`;
     } else if (activeSession.providerType === 'stalker' && activeSession.stalkerUrl) {
-      desc = `Stalker: ${activeSession.stalkerUrl}`;
+      desc = `Stalker Portal: ${activeSession.stalkerUrl}`;
     }
     if (text) text.textContent = desc;
     banner.classList.remove('hidden');
@@ -138,8 +145,12 @@ export function updateSessionBannerUI(session: any = null): void {
   }
 }
 
-export function clearSavedConnectionSession(): void {
-  if (confirm('Disconnect current session and clear saved server credentials?')) {
+export async function clearSavedConnectionSession(): Promise<void> {
+  const confirmed = await showAppConfirm(
+    'Disconnect current session and clear saved server credentials?',
+    { title: 'Disconnect Session', confirmText: 'Disconnect', cancelText: 'Keep Session', type: 'danger' }
+  );
+  if (confirmed) {
     QuantumSessionStore.clearSession();
     state.lastXtreamHost = undefined;
     state.lastXtreamUser = undefined;
@@ -151,7 +162,7 @@ export function clearSavedConnectionSession(): void {
     if (xtreamUserInput) xtreamUserInput.value = '';
     if (xtreamPassInput) xtreamPassInput.value = '';
     updateSessionBannerUI();
-    alert('Saved session credentials and stored channels cleared.');
+    engine.showToast('Saved session credentials and stored channels cleared.', 'info');
   }
 }
 
@@ -198,7 +209,7 @@ export async function connectStalkerPortal(): Promise<void> {
   const portal = (document.getElementById('input-stalker-url') as HTMLInputElement | null)?.value.trim();
   const mac = (document.getElementById('input-stalker-mac') as HTMLInputElement | null)?.value.trim();
   if (!portal || !mac) {
-    alert('Please enter Stalker Portal URL and Device MAC address.');
+    showAppAlert('Please enter Stalker Portal URL and Device MAC address.', { title: 'Missing Credentials', type: 'warning' });
     return;
   }
   engine.showSpinner(true, 'Connecting Stalker Portal...');
@@ -213,17 +224,17 @@ export async function connectStalkerPortal(): Promise<void> {
     updateSessionBannerUI();
     engine.showSpinner(false);
     closeM3uModal();
-    alert('Stalker Portal connected successfully!');
+    showAppAlert('Stalker Portal connected successfully!', { title: 'Stalker Portal', type: 'success' });
   } catch (e: any) {
     engine.showSpinner(false);
-    alert(`Stalker Portal Error: ${e.message}`);
+    showAppAlert(`Stalker Portal Error: ${e.message}`, { title: 'Stalker Portal Error', type: 'error' });
   }
 }
 
 export async function loadXmltvFeed(): Promise<void> {
   const url = (document.getElementById('input-xmltv-url') as HTMLInputElement | null)?.value.trim();
   if (!url) {
-    alert('Please enter an XMLTV Guide Feed URL.');
+    showAppAlert('Please enter an XMLTV Guide Feed URL.', { title: 'Missing URL', type: 'warning' });
     return;
   }
   engine.showSpinner(true, 'Downloading XMLTV EPG...');
@@ -232,16 +243,16 @@ export async function loadXmltvFeed(): Promise<void> {
     QuantumSessionStore.saveSession({ xmltvUrl: url });
     engine.showSpinner(false);
     closeM3uModal();
-    alert(`Successfully mapped ${mapped} broadcast guide entries from XMLTV feed!`);
+    showAppAlert(`Successfully mapped ${mapped} broadcast guide entries from XMLTV feed!`, { title: 'XMLTV Guide', type: 'success' });
   } catch (e: any) {
     engine.showSpinner(false);
-    alert(`XMLTV Guide Error: ${e.message}`);
+    showAppAlert(`XMLTV Guide Error: ${e.message}`, { title: 'XMLTV Guide Error', type: 'error' });
   }
 }
 
 export function tuneToAsianetNews(): void {
   if (!state.channels || state.channels.length === 0) {
-    alert('Loading India M3U playlist for Asianet News...');
+    engine.showToast('Loading India M3U playlist for Asianet News...', 'info');
     loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u');
     return;
   }
@@ -257,7 +268,7 @@ export function tuneToAsianetNews(): void {
       tuneToChannel(asianetCh);
     }
   } else {
-    alert('Asianet News not in active view. Fetching India channels bundle...');
+    engine.showToast('Asianet News not in active view. Fetching India channels bundle...', 'info');
     loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u');
   }
 }
@@ -278,6 +289,11 @@ export function triggerSurpriseChannel(): void {
 (window as any).openM3uModal = openM3uModal;
 (window as any).closeM3uModal = closeM3uModal;
 (window as any).openRemoteModal = openRemoteModal;
+(window as any).closeRemoteModal = closeRemoteModal;
+(window as any).closeModals = closeModals;
+(window as any).showAppAlert = showAppAlert;
+(window as any).showAppConfirm = showAppConfirm;
+(window as any).closeAppDialog = closeAppDialog;
 (window as any).setM3uUrl = setM3uUrl;
 (window as any).switchProviderTab = switchProviderTab;
 (window as any).updateSessionBannerUI = updateSessionBannerUI;
@@ -364,11 +380,13 @@ export function setupEventListeners(): void {
     video.addEventListener('playing', () => {
       adjustMobileVideoStage();
       engine.onStreamPlaying();
+      showEngineHud(true, 3000);
       wakeControls();
     });
     video.addEventListener('resize', adjustMobileVideoStage);
     video.addEventListener('waiting', () => {
       engine.showSpinner(true, 'Buffering Stream...');
+      showEngineHud(true, 0);
     });
     video.addEventListener('error', () => {
       engine.onStreamFailed('Video playback error');
@@ -527,19 +545,24 @@ export function setupEventListeners(): void {
 
   const btnOpenRemote = document.getElementById('btn-open-remote-modal');
   const btnCloseRemote = document.getElementById('btn-close-remote-modal');
+  const btnCloseM3u = document.getElementById('btn-close-m3u-modal');
   const modalRemote = document.getElementById('modal-remote');
   const btnFetchM3u = document.getElementById('btn-fetch-m3u');
   const btnCopyRemote = document.getElementById('btn-copy-remote-link');
 
   if (btnOpenRemote) {
     btnOpenRemote.addEventListener('click', () => {
-      setupRemoteModal();
-      if (modalRemote) modalRemote.classList.remove('hidden');
+      openRemoteModal();
     });
   }
   if (btnCloseRemote) {
     btnCloseRemote.addEventListener('click', () => {
-      if (modalRemote) modalRemote.classList.add('hidden');
+      closeRemoteModal();
+    });
+  }
+  if (btnCloseM3u) {
+    btnCloseM3u.addEventListener('click', () => {
+      closeM3uModal();
     });
   }
 
