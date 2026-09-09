@@ -32,8 +32,8 @@ export function closeModals(): void {
   closeQuarantineModal();
   closeSeriesExplorer();
   closeMovieExplorer();
-  const modalRemoteMovie = document.getElementById('modal-remote-movie-explorer');
-  const modalRemoteSeries = document.getElementById('modal-remote-series-explorer');
+  const modalRemoteMovie = document.getElementById('rem-modal-movie');
+  const modalRemoteSeries = document.getElementById('rem-modal-series');
   if (modalRemoteMovie) modalRemoteMovie.classList.add('hidden');
   if (modalRemoteSeries) modalRemoteSeries.classList.add('hidden');
   const modalAppDialog = document.getElementById('modal-app-dialog');
@@ -51,8 +51,9 @@ if (typeof document !== 'undefined') {
       'modal-quarantine',
       'modal-series-explorer',
       'modal-movie-explorer',
-      'modal-remote-movie-explorer',
-      'modal-remote-series-explorer'
+      'rem-modal-movie',
+      'rem-modal-series',
+      'modal-app-dialog'
     ];
     if (modalIds.includes(target.id)) {
       target.classList.add('hidden');
