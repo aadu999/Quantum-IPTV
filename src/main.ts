@@ -1,0 +1,816 @@
+import { state, DEFAULT_PRESET_CHANNELS } from './state/store';
+import { QuantumSessionStore } from './state/session';
+import { userProfile, decisionEngine } from './state/user-profile';
+import { circuitBreaker } from './player/circuit-breaker';
+import { playbackMachine } from './player/playback-machine';
+import { QuantumStreamEngine } from './player/engine';
+import { loadM3uPlaylist, quarantineManager, sanitizeChannel } from './services/m3u';
+import { xtreamConnector, parseXtreamInput, attachXtreamAutoParse } from './services/xtream';
+import { stalkerConnector } from './services/stalker';
+import { xmltvParser, generateSyntheticEpg } from './services/xmltv';
+import { QuantumOfflineCache, workerEngine } from './services/cache';
+import {
+  initRemoteSync,
+  broadcastTVState,
+  broadcastTVCatalog,
+  checkAndLaunchRemoteView,
+  setupRemoteModal,
+  sendRemoteCmd,
+  setupRemoteSeekControls
+} from './services/remote';
+import {
+  setEngineInstance,
+  togglePlayPause,
+  toggleFullscreenMode,
+  wakeControls,
+  unmuteAudioNow,
+  seekVideo,
+  handleSeekBarClick,
+  playNextWorkingChannel,
+  updatePlayPauseIcons,
+  showTvVolumeHud,
+  updateTimeAndSeekBar,
+  adjustMobileVideoStage
+} from './ui/controls';
+import {
+  setChannelEngineInstance,
+  playChannel,
+  tuneToChannel,
+  filterChannels,
+  renderChannelList,
+  updateFavoritesUI,
+  loadMoreTvChannels,
+  renderRemoteChannelsList,
+  renderRemoteFavsList,
+  clearRemoteSearch,
+  loadMoreRemoteChannels
+} from './ui/channels';
+import {
+  setModalEngineInstance,
+  closeModals,
+  openSeriesExplorer,
+  openMovieExplorer,
+  openQuarantineModal,
+  closeQuarantineModal,
+  switchQuarantineTab,
+  copyToClipboard
+} from './ui/modals';
+
+// Instantiate Core Stream Engine
+const videoElement = document.getElementById('video-player') as HTMLVideoElement;
+export const engine = new QuantumStreamEngine(videoElement);
+
+// Inject Engine instance into UI modules
+setEngineInstance(engine);
+setChannelEngineInstance(engine);
+setModalEngineInstance(engine);
+
+// Window Attachments for Global HTML Handlers
+(window as any).engine = engine;
+(window as any).state = state;
+(window as any).xtreamConnector = xtreamConnector;
+(window as any).circuitBreaker = circuitBreaker;
+(window as any).quarantineManager = quarantineManager;
+(window as any).playbackMachine = playbackMachine;
+(window as any).decisionEngine = decisionEngine;
+(window as any).userProfile = userProfile;
+(window as any).QuantumSessionStore = QuantumSessionStore;
+(window as any).QuantumOfflineCache = QuantumOfflineCache;
+(window as any).loadM3uPlaylist = loadM3uPlaylist;
+
+export function openM3uModal(): void {
+  const modal = document.getElementById('modal-m3u');
+  if (modal) modal.classList.remove('hidden');
+}
+
+export function closeM3uModal(): void {
+  const modal = document.getElementById('modal-m3u');
+  if (modal) modal.classList.add('hidden');
+}
+
+export function openRemoteModal(): void {
+  setupRemoteModal();
+  const modal = document.getElementById('modal-remote');
+  if (modal) modal.classList.remove('hidden');
+}
+
+export function setM3uUrl(url: string): void {
+  const input = document.getElementById('input-m3u-url') as HTMLInputElement | null;
+  if (input) input.value = url;
+}
+
+export function switchProviderTab(tab: string): void {
+  const tabs = ['m3u', 'xtream', 'stalker', 'xmltv'];
+  tabs.forEach(t => {
+    const tabBtn = document.getElementById(`tab-provider-${t}`);
+    const sec = document.getElementById(`provider-section-${t}`);
+    if (tabBtn && sec) {
+      if (t === tab) {
+        tabBtn.className = 'pb-2 border-b-2 border-brand-500 text-brand-400 font-bold transition';
+        sec.classList.remove('hidden');
+      } else {
+        tabBtn.className = 'pb-2 border-b-2 border-transparent text-slate-400 hover:text-white font-semibold transition';
+        sec.classList.add('hidden');
+      }
+    }
+  });
+}
+
+export function updateSessionBannerUI(session: any = null): void {
+  const banner = document.getElementById('m3u-session-banner');
+  const text = document.getElementById('m3u-session-status-text');
+  if (!banner) return;
+
+  const activeSession = session || QuantumSessionStore.loadSession();
+  if (activeSession && (activeSession.xtreamHost || activeSession.customM3uUrl || activeSession.stalkerUrl)) {
+    let desc = 'Saved connection session active';
+    if (activeSession.providerType === 'xtream' && activeSession.xtreamHost) {
+      desc = `Xtream API: ${activeSession.xtreamHost} (${activeSession.xtreamUser || 'user'})`;
+    } else if (activeSession.providerType === 'm3u' && activeSession.customM3uUrl) {
+      desc = `M3U URL: ${activeSession.customM3uUrl}`;
+    } else if (activeSession.providerType === 'stalker' && activeSession.stalkerUrl) {
+      desc = `Stalker: ${activeSession.stalkerUrl}`;
+    }
+    if (text) text.textContent = desc;
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+}
+
+export function clearSavedConnectionSession(): void {
+  if (confirm('Disconnect current session and clear saved server credentials?')) {
+    QuantumSessionStore.clearSession();
+    state.lastXtreamHost = undefined;
+    state.lastXtreamUser = undefined;
+    state.lastXtreamPass = undefined;
+    const xtreamHostInput = document.getElementById('input-xtream-host') as HTMLInputElement | null;
+    const xtreamUserInput = document.getElementById('input-xtream-user') as HTMLInputElement | null;
+    const xtreamPassInput = document.getElementById('input-xtream-pass') as HTMLInputElement | null;
+    if (xtreamHostInput) xtreamHostInput.value = '';
+    if (xtreamUserInput) xtreamUserInput.value = '';
+    if (xtreamPassInput) xtreamPassInput.value = '';
+    updateSessionBannerUI();
+    alert('Saved session credentials and stored channels cleared.');
+  }
+}
+
+export async function connectXtreamApi(overrideHost?: string, overrideUser?: string, overridePass?: string): Promise<number | void> {
+  const hostInput = document.getElementById('input-xtream-host') as HTMLInputElement | null;
+  const userInput = document.getElementById('input-xtream-user') as HTMLInputElement | null;
+  const passInput = document.getElementById('input-xtream-pass') as HTMLInputElement | null;
+
+  const host = overrideHost || hostInput?.value.trim() || '';
+  const user = overrideUser || userInput?.value.trim() || '';
+  const pass = overridePass || passInput?.value.trim() || '';
+
+  const { host: cleanHost, username: cleanUser, password: cleanPass } = parseXtreamInput(host, user, pass);
+
+  if (!cleanHost || (!cleanUser && !user) || (!cleanPass && !pass)) {
+    engine.showToast('Please enter Host, Username, and Password for Xtream API', 'error');
+    return;
+  }
+
+  engine.showSpinner(true, 'Connecting to Xtream API...');
+  try {
+    const count = await xtreamConnector.fetchXtreamPlaylist(cleanHost, cleanUser, cleanPass);
+    QuantumSessionStore.saveSession({
+      providerType: 'xtream',
+      xtreamHost: cleanHost,
+      xtreamUser: cleanUser,
+      xtreamPass: cleanPass
+    });
+    QuantumSessionStore.saveChannels(state.channels);
+    updateSessionBannerUI();
+    engine.showSpinner(false);
+    closeM3uModal();
+    engine.showToast(`Imported ${count.toLocaleString()} streams from Xtream API!`, 'success');
+    broadcastTVState();
+    broadcastTVCatalog();
+    return count;
+  } catch (e: any) {
+    engine.showSpinner(false);
+    engine.showToast(`Xtream API Error: ${e.message}`, 'error');
+  }
+}
+
+export async function connectStalkerPortal(): Promise<void> {
+  const portal = (document.getElementById('input-stalker-url') as HTMLInputElement | null)?.value.trim();
+  const mac = (document.getElementById('input-stalker-mac') as HTMLInputElement | null)?.value.trim();
+  if (!portal || !mac) {
+    alert('Please enter Stalker Portal URL and Device MAC address.');
+    return;
+  }
+  engine.showSpinner(true, 'Connecting Stalker Portal...');
+  try {
+    await stalkerConnector.fetchStalkerPortal(portal, mac);
+    QuantumSessionStore.saveSession({
+      providerType: 'stalker',
+      stalkerUrl: portal,
+      stalkerMac: mac
+    });
+    QuantumSessionStore.saveChannels(state.channels);
+    updateSessionBannerUI();
+    engine.showSpinner(false);
+    closeM3uModal();
+    alert('Stalker Portal connected successfully!');
+  } catch (e: any) {
+    engine.showSpinner(false);
+    alert(`Stalker Portal Error: ${e.message}`);
+  }
+}
+
+export async function loadXmltvFeed(): Promise<void> {
+  const url = (document.getElementById('input-xmltv-url') as HTMLInputElement | null)?.value.trim();
+  if (!url) {
+    alert('Please enter an XMLTV Guide Feed URL.');
+    return;
+  }
+  engine.showSpinner(true, 'Downloading XMLTV EPG...');
+  try {
+    const mapped = await xmltvParser.loadExternalEPG(url);
+    QuantumSessionStore.saveSession({ xmltvUrl: url });
+    engine.showSpinner(false);
+    closeM3uModal();
+    alert(`Successfully mapped ${mapped} broadcast guide entries from XMLTV feed!`);
+  } catch (e: any) {
+    engine.showSpinner(false);
+    alert(`XMLTV Guide Error: ${e.message}`);
+  }
+}
+
+export function tuneToAsianetNews(): void {
+  if (!state.channels || state.channels.length === 0) {
+    alert('Loading India M3U playlist for Asianet News...');
+    loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u');
+    return;
+  }
+  const asianetCh =
+    state.channels.find(c => /asianet\s*news/i.test(c.name)) ||
+    state.channels.find(c => /asianet/i.test(c.name));
+
+  if (asianetCh) {
+    const idx = state.filteredChannels.indexOf(asianetCh);
+    if (idx !== -1) {
+      playChannel(idx);
+    } else {
+      tuneToChannel(asianetCh);
+    }
+  } else {
+    alert('Asianet News not in active view. Fetching India channels bundle...');
+    loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u');
+  }
+}
+
+export function triggerSurpriseChannel(): void {
+  const surprise = decisionEngine.getRandomSurpriseChannel();
+  if (!surprise) return;
+
+  const idx = state.filteredChannels.findIndex(c => c.id === surprise.id);
+  if (idx !== -1) {
+    playChannel(idx);
+  } else {
+    tuneToChannel(surprise);
+  }
+}
+
+// Bind interactive handlers to window
+(window as any).openM3uModal = openM3uModal;
+(window as any).closeM3uModal = closeM3uModal;
+(window as any).openRemoteModal = openRemoteModal;
+(window as any).setM3uUrl = setM3uUrl;
+(window as any).switchProviderTab = switchProviderTab;
+(window as any).updateSessionBannerUI = updateSessionBannerUI;
+(window as any).clearSavedConnectionSession = clearSavedConnectionSession;
+(window as any).connectXtreamApi = connectXtreamApi;
+(window as any).connectStalkerPortal = connectStalkerPortal;
+(window as any).loadXmltvFeed = loadXmltvFeed;
+(window as any).tuneToAsianetNews = tuneToAsianetNews;
+(window as any).triggerSurpriseChannel = triggerSurpriseChannel;
+(window as any).hideOfflineOverlay = () => engine.hideOfflineOverlay();
+
+export function setupEventListeners(): void {
+  // Auto-parse full get.php URLs pasted into Host inputs
+  attachXtreamAutoParse('input-xtream-host', 'input-xtream-user', 'input-xtream-pass');
+  attachXtreamAutoParse('rem-xtream-host', 'rem-xtream-user', 'rem-xtream-pass');
+
+  // Prevent double-tap and gesture zoom
+  let lastTouchEnd = 0;
+  document.addEventListener(
+    'touchend',
+    e => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 350) {
+        e.preventDefault();
+      }
+      lastTouchEnd = now;
+    },
+    { passive: false }
+  );
+
+  document.addEventListener(
+    'touchstart',
+    e => {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(evt => {
+    document.addEventListener(evt, e => e.preventDefault());
+  });
+
+  const video = engine.video;
+  const videoStage = document.getElementById('video-stage');
+  const btnPlayPause = document.getElementById('btn-play-pause');
+  const btnPrevChannel = document.getElementById('btn-prev-channel');
+  const btnNextChannel = document.getElementById('btn-next-channel');
+  const btnFullscreen = document.getElementById('btn-fullscreen');
+  const btnHeaderFullscreen = document.getElementById('btn-header-fullscreen');
+  const btnMute = document.getElementById('btn-mute');
+  const unmuteBanner = document.getElementById('unmute-banner');
+  const volSlider = document.getElementById('vol-slider') as HTMLInputElement | null;
+  const btnAspect = document.getElementById('btn-aspect');
+  const btnPip = document.getElementById('btn-pip');
+  const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
+  const regionFilter = document.getElementById('region-filter') as HTMLSelectElement | null;
+  const categoryFilter = document.getElementById('category-filter') as HTMLSelectElement | null;
+  const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;
+  const filterActiveOnly = document.getElementById('filter-active-only') as HTMLInputElement | null;
+  const viewChannels = document.getElementById('view-channels');
+  const viewEpg = document.getElementById('view-epg');
+  const viewFavorites = document.getElementById('view-favorites');
+  const playerControls = document.getElementById('player-controls');
+
+  if (video && !state.isRemoteClient) {
+    video.addEventListener('click', () => {
+      if (video.muted) unmuteAudioNow();
+      togglePlayPause();
+    });
+    video.addEventListener('play', () => {
+      updatePlayPauseIcons();
+      wakeControls();
+    });
+    video.addEventListener('pause', () => {
+      updatePlayPauseIcons();
+      if (videoStage) videoStage.classList.remove('fullscreen-idle');
+    });
+    video.addEventListener('loadedmetadata', () => {
+      adjustMobileVideoStage();
+      updateTimeAndSeekBar();
+    });
+    video.addEventListener('playing', () => {
+      adjustMobileVideoStage();
+      engine.onStreamPlaying();
+      wakeControls();
+    });
+    video.addEventListener('resize', adjustMobileVideoStage);
+    video.addEventListener('waiting', () => {
+      engine.showSpinner(true, 'Buffering Stream...');
+    });
+    video.addEventListener('error', () => {
+      engine.onStreamFailed('Video playback error');
+    });
+
+    let lastTimeBroadcast = 0;
+    video.addEventListener('timeupdate', () => {
+      updateTimeAndSeekBar();
+      const now = Date.now();
+      if (video.duration && isFinite(video.duration) && now - lastTimeBroadcast > 1000) {
+        lastTimeBroadcast = now;
+        broadcastTVState();
+      }
+    });
+    video.addEventListener('durationchange', () => {
+      updateTimeAndSeekBar();
+      broadcastTVState();
+    });
+  }
+
+  if (btnPlayPause) btnPlayPause.addEventListener('click', togglePlayPause);
+  if (btnPrevChannel) {
+    btnPrevChannel.addEventListener('click', () => {
+      if (state.currentChannelIndex > 0) playChannel(state.currentChannelIndex - 1);
+    });
+  }
+  if (btnNextChannel) {
+    btnNextChannel.addEventListener('click', () => {
+      if (state.currentChannelIndex < state.filteredChannels.length - 1) {
+        playChannel(state.currentChannelIndex + 1);
+      }
+    });
+  }
+  if (btnFullscreen) btnFullscreen.addEventListener('click', () => toggleFullscreenMode());
+  if (btnHeaderFullscreen) btnHeaderFullscreen.addEventListener('click', () => toggleFullscreenMode());
+
+  if (btnMute) {
+    btnMute.addEventListener('click', () => {
+      if (video) {
+        video.muted = !video.muted;
+        btnMute.innerHTML = video.muted
+          ? '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>'
+          : '<i class="fa-solid fa-volume-high text-xs"></i>';
+        if (unmuteBanner && !video.muted) unmuteBanner.classList.add('hidden');
+        showTvVolumeHud(video.volume, video.muted);
+        broadcastTVState();
+      }
+    });
+  }
+
+  if (volSlider) {
+    volSlider.addEventListener('input', e => {
+      if (video) {
+        video.volume = parseFloat((e.target as HTMLInputElement).value);
+        video.muted = false;
+        if (unmuteBanner) unmuteBanner.classList.add('hidden');
+        showTvVolumeHud(video.volume, false);
+        broadcastTVState();
+      }
+    });
+  }
+
+  if (btnAspect) {
+    btnAspect.addEventListener('click', () => {
+      state.aspectIndex = (state.aspectIndex + 1) % state.aspectModes.length;
+      if (video) video.className = `w-full h-full ${state.aspectModes[state.aspectIndex]} bg-black`;
+      btnAspect.textContent = state.aspectLabels[state.aspectIndex];
+    });
+  }
+
+  if (btnPip) {
+    btnPip.addEventListener('click', async () => {
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else if (video) {
+          await video.requestPictureInPicture();
+        }
+      } catch (e) {}
+    });
+  }
+
+  const tabChannels = document.getElementById('tab-btn-channels');
+  const tabEpg = document.getElementById('tab-btn-epg');
+  const tabFavs = document.getElementById('tab-btn-favs');
+
+  function switchTab(view: 'channels' | 'epg' | 'favs'): void {
+    if (viewChannels) viewChannels.classList.toggle('hidden', view !== 'channels');
+    if (viewEpg) viewEpg.classList.toggle('hidden', view !== 'epg');
+    if (viewFavorites) viewFavorites.classList.toggle('hidden', view !== 'favs');
+
+    [tabChannels, tabEpg, tabFavs].forEach(b => {
+      if (b) {
+        b.classList.remove('bg-brand-600', 'text-white');
+        b.classList.add('text-slate-400');
+      }
+    });
+
+    if (view === 'channels' && tabChannels) {
+      tabChannels.classList.add('bg-brand-600', 'text-white');
+    } else if (view === 'epg' && tabEpg) {
+      tabEpg.classList.add('bg-brand-600', 'text-white');
+      generateSyntheticEpg();
+    } else if (view === 'favs' && tabFavs) {
+      tabFavs.classList.add('bg-brand-600', 'text-white');
+      updateFavoritesUI();
+    }
+  }
+
+  if (tabChannels) tabChannels.addEventListener('click', () => switchTab('channels'));
+  if (tabEpg) tabEpg.addEventListener('click', () => switchTab('epg'));
+  if (tabFavs) tabFavs.addEventListener('click', () => switchTab('favs'));
+
+  if (searchInput) searchInput.addEventListener('input', () => filterChannels());
+  if (regionFilter) regionFilter.addEventListener('change', () => filterChannels());
+  if (languageFilter) languageFilter.addEventListener('change', () => filterChannels());
+  if (categoryFilter) categoryFilter.addEventListener('change', () => filterChannels());
+
+  if (filterActiveOnly) {
+    filterActiveOnly.addEventListener('change', e => {
+      state.hideOfflineFeeds = (e.target as HTMLInputElement).checked;
+      filterChannels();
+    });
+  }
+
+  if (viewChannels) {
+    viewChannels.addEventListener('scroll', () => {
+      if (viewChannels.scrollTop + viewChannels.clientHeight >= viewChannels.scrollHeight - 160) {
+        loadMoreTvChannels();
+      }
+    });
+  }
+
+  const btnRetryOffline = document.getElementById('btn-retry-offline');
+  if (btnRetryOffline) {
+    btnRetryOffline.addEventListener('click', () => {
+      engine.hideOfflineOverlay();
+      playChannel(state.currentChannelIndex);
+    });
+  }
+
+  const btnSkipOffline = document.getElementById('btn-skip-offline');
+  if (btnSkipOffline) {
+    btnSkipOffline.addEventListener('click', () => {
+      playNextWorkingChannel();
+    });
+  }
+
+  const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+  const channelSidebar = document.getElementById('channel-sidebar');
+  if (btnToggleSidebar && channelSidebar) {
+    btnToggleSidebar.addEventListener('click', () => {
+      channelSidebar.classList.toggle('hidden');
+    });
+  }
+
+  const btnOpenRemote = document.getElementById('btn-open-remote-modal');
+  const btnCloseRemote = document.getElementById('btn-close-remote-modal');
+  const modalRemote = document.getElementById('modal-remote');
+  const btnFetchM3u = document.getElementById('btn-fetch-m3u');
+  const btnCopyRemote = document.getElementById('btn-copy-remote-link');
+
+  if (btnOpenRemote) {
+    btnOpenRemote.addEventListener('click', () => {
+      setupRemoteModal();
+      if (modalRemote) modalRemote.classList.remove('hidden');
+    });
+  }
+  if (btnCloseRemote) {
+    btnCloseRemote.addEventListener('click', () => {
+      if (modalRemote) modalRemote.classList.add('hidden');
+    });
+  }
+
+  if (btnFetchM3u) {
+    btnFetchM3u.addEventListener('click', () => {
+      const urlInput = document.getElementById('input-m3u-url') as HTMLInputElement | null;
+      if (urlInput && urlInput.value) {
+        const url = urlInput.value.trim();
+        loadM3uPlaylist(url);
+        QuantumSessionStore.saveSession({
+          providerType: 'm3u',
+          customM3uUrl: url
+        });
+        setTimeout(() => {
+          QuantumSessionStore.saveChannels(state.channels);
+          updateSessionBannerUI();
+        }, 1200);
+      }
+    });
+  }
+
+  if (btnCopyRemote) {
+    btnCopyRemote.addEventListener('click', () => {
+      const remoteUrl = `${window.location.origin}${window.location.pathname}?remote=${state.roomId}`;
+      copyToClipboard(remoteUrl);
+      btnCopyRemote.textContent = 'Copied!';
+      setTimeout(() => {
+        btnCopyRemote.innerHTML = '<i class="fa-regular fa-copy mr-1"></i>Copy Link';
+      }, 2000);
+    });
+  }
+
+  if (videoStage) {
+    ['mousemove', 'mousedown', 'touchstart', 'touchmove', 'keydown'].forEach(evt => {
+      videoStage.addEventListener(evt, wakeControls, { passive: true });
+    });
+  }
+
+  if (playerControls) {
+    playerControls.addEventListener('mouseenter', () => {
+      if (videoStage) videoStage.classList.remove('fullscreen-idle');
+    });
+    playerControls.addEventListener('mouseleave', wakeControls);
+  }
+
+  window.addEventListener('keydown', e => {
+    if (
+      state.isRemoteClient ||
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLSelectElement ||
+      e.target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+
+    const hasFiniteDuration = video && video.duration && isFinite(video.duration) && video.duration > 0;
+
+    switch (e.code) {
+      case 'Space':
+      case 'KeyK':
+      case 'MediaPlayPause':
+      case 'MediaPlay':
+      case 'MediaPause':
+        e.preventDefault();
+        togglePlayPause();
+        break;
+      case 'Enter':
+      case 'NumpadEnter':
+      case 'Select':
+        if (!document.activeElement || document.activeElement === document.body || document.activeElement === video) {
+          e.preventDefault();
+          togglePlayPause();
+        }
+        break;
+      case 'KeyF':
+        toggleFullscreenMode();
+        break;
+      case 'KeyM':
+        if (video) {
+          video.muted = !video.muted;
+          showTvVolumeHud(video.volume, video.muted);
+          broadcastTVState();
+        }
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        if (video) {
+          video.volume = Math.min(1, Math.round((video.volume + 0.05) * 100) / 100);
+          if (volSlider) volSlider.value = String(video.volume);
+          showTvVolumeHud(video.volume, video.muted);
+          broadcastTVState();
+        }
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        if (video) {
+          video.volume = Math.max(0, Math.round((video.volume - 0.05) * 100) / 100);
+          if (volSlider) volSlider.value = String(video.volume);
+          showTvVolumeHud(video.volume, video.muted);
+          broadcastTVState();
+        }
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        if (hasFiniteDuration) {
+          seekVideo(10);
+        } else if (state.currentChannelIndex < state.filteredChannels.length - 1) {
+          playChannel(state.currentChannelIndex + 1);
+        }
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        if (hasFiniteDuration) {
+          seekVideo(-10);
+        } else if (state.currentChannelIndex > 0) {
+          playChannel(state.currentChannelIndex - 1);
+        }
+        break;
+      case 'KeyL':
+      case 'MediaFastForward':
+        seekVideo(10);
+        break;
+      case 'KeyJ':
+      case 'MediaRewind':
+        seekVideo(-10);
+        break;
+      case 'KeyN':
+      case 'MediaTrackNext':
+        if (state.currentChannelIndex < state.filteredChannels.length - 1) {
+          playChannel(state.currentChannelIndex + 1);
+        }
+        break;
+      case 'KeyP':
+      case 'MediaTrackPrevious':
+        if (state.currentChannelIndex > 0) {
+          playChannel(state.currentChannelIndex - 1);
+        }
+    }
+  });
+
+  window.addEventListener('resize', adjustMobileVideoStage);
+}
+
+// Global App Initialization
+export function initApp(): void {
+  // 1. Restore persistent QuantumSessionStore session & credentials
+  const savedSession = QuantumSessionStore.loadSession();
+  if (savedSession) {
+    if (savedSession.xtreamHost) state.lastXtreamHost = savedSession.xtreamHost;
+    if (savedSession.xtreamUser) state.lastXtreamUser = savedSession.xtreamUser;
+    if (savedSession.xtreamPass) state.lastXtreamPass = savedSession.xtreamPass;
+
+    const xtreamHostInput = document.getElementById('input-xtream-host') as HTMLInputElement | null;
+    const xtreamUserInput = document.getElementById('input-xtream-user') as HTMLInputElement | null;
+    const xtreamPassInput = document.getElementById('input-xtream-pass') as HTMLInputElement | null;
+    const m3uUrlInput = document.getElementById('input-m3u-url') as HTMLInputElement | null;
+    const stalkerUrlInput = document.getElementById('input-stalker-url') as HTMLInputElement | null;
+    const stalkerMacInput = document.getElementById('input-stalker-mac') as HTMLInputElement | null;
+    const xmltvUrlInput = document.getElementById('input-xmltv-url') as HTMLInputElement | null;
+
+    if (xtreamHostInput && savedSession.xtreamHost) xtreamHostInput.value = savedSession.xtreamHost;
+    if (xtreamUserInput && savedSession.xtreamUser) xtreamUserInput.value = savedSession.xtreamUser;
+    if (xtreamPassInput && savedSession.xtreamPass) xtreamPassInput.value = savedSession.xtreamPass;
+    if (m3uUrlInput && savedSession.customM3uUrl) m3uUrlInput.value = savedSession.customM3uUrl;
+    if (stalkerUrlInput && savedSession.stalkerUrl) stalkerUrlInput.value = savedSession.stalkerUrl;
+    if (stalkerMacInput && savedSession.stalkerMac) stalkerMacInput.value = savedSession.stalkerMac;
+    if (xmltvUrlInput && savedSession.xmltvUrl) xmltvUrlInput.value = savedSession.xmltvUrl;
+
+    updateSessionBannerUI(savedSession);
+  }
+
+  // 2. Restore saved channels bundle if available
+  const savedChannels = QuantumSessionStore.loadChannels();
+  if (savedChannels && Array.isArray(savedChannels) && savedChannels.length > 0) {
+    const sanitized = savedChannels.map(ch => sanitizeChannel(ch));
+    state.channels = sanitized;
+  } else {
+    const cached = QuantumOfflineCache.loadBundle();
+    if (cached && cached.channels && cached.channels.length > 0) {
+      const sanitized = cached.channels.map((ch: any) => sanitizeChannel(ch));
+      state.channels = sanitized;
+    }
+  }
+
+  // Always ensure default preset Live channels are merged in
+  DEFAULT_PRESET_CHANNELS.forEach(preset => {
+    if (!state.channels.some(c => c.id === preset.id || (c.url && c.url === preset.url))) {
+      state.channels.push(preset);
+    }
+  });
+  state.filteredChannels = [...state.channels];
+
+  checkAndLaunchRemoteView();
+  setupEventListeners();
+  initRemoteSync();
+  setupRemoteSeekControls();
+
+  if (!state.isRemoteClient) {
+    engine.initHls();
+    renderChannelList();
+    updateFavoritesUI();
+    adjustMobileVideoStage();
+
+    // 3. Resume last played channel index if saved
+    let initialIndex = 0;
+    if (
+      savedSession &&
+      typeof savedSession.lastChannelIndex === 'number' &&
+      savedSession.lastChannelIndex >= 0 &&
+      savedSession.lastChannelIndex < state.filteredChannels.length
+    ) {
+      initialIndex = savedSession.lastChannelIndex;
+    } else {
+      const firstLive = state.filteredChannels.findIndex(c => c.type !== 'series' && c.type !== 'vod');
+      if (firstLive !== -1) initialIndex = firstLive;
+    }
+    playChannel(initialIndex, { directPlay: true });
+
+    // 4. Background re-sync for active provider session or public live channels
+    const liveCount = state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId).length;
+    const hasCustomProvider = savedSession && (
+      (savedSession.providerType === 'xtream' && savedSession.xtreamHost) ||
+      (savedSession.providerType === 'm3u' && savedSession.customM3uUrl) ||
+      (savedSession.providerType === 'stalker' && savedSession.stalkerUrl)
+    );
+
+    if (
+      savedSession &&
+      savedSession.providerType === 'xtream' &&
+      savedSession.xtreamHost &&
+      savedSession.xtreamUser &&
+      savedSession.xtreamPass
+    ) {
+      xtreamConnector
+        .fetchXtreamPlaylist(savedSession.xtreamHost, savedSession.xtreamUser, savedSession.xtreamPass)
+        .then(() => {
+          renderChannelList();
+          QuantumSessionStore.saveChannels(state.channels);
+        })
+        .catch(err => console.warn('Background Xtream re-sync warning:', err.message));
+    } else if (savedSession && savedSession.providerType === 'm3u' && savedSession.customM3uUrl) {
+      loadM3uPlaylist(savedSession.customM3uUrl, true);
+    }
+
+    // Always ensure live regional channels from iptv-org are imported if not on custom provider or count is low
+    if (!hasCustomProvider || liveCount < 30) {
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tel.m3u', true, 'Telugu');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tam.m3u', true, 'Tamil');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
+    }
+  } else {
+    adjustMobileVideoStage();
+    const remoteLiveCount = state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId).length;
+    if (remoteLiveCount < 30) {
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/countries/in.m3u', true);
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/mal.m3u', true, 'Malayalam');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tel.m3u', true, 'Telugu');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/tam.m3u', true, 'Tamil');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
+      loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
+    }
+    renderRemoteChannelsList();
+    renderRemoteFavsList();
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
