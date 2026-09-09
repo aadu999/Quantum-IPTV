@@ -3893,17 +3893,25 @@
 
       if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_CATALOG', payload: catalogData });
       if (mqttClient && mqttClient.connected) {
-        mqttClient.publish(`quantum_tv/${state.roomId}/catalog`, JSON.stringify(catalogData));
+        // Send lightweight catalog payload over MQTT to stay well below 256KB broker payload limit
+        const lightCatalog = {
+          channels: state.channels ? state.channels.slice(0, 100) : [],
+          channelCount: state.channels ? state.channels.length : 0,
+          session: session
+        };
+        mqttClient.publish(`quantum_tv/${state.roomId}/catalog`, JSON.stringify(lightCatalog));
       }
     }
 
-    function handleIncomingCatalogSync(payload) {
+    async function handleIncomingCatalogSync(payload) {
       if (!payload) return;
 
       if (Array.isArray(payload.channels) && payload.channels.length > 0) {
-        state.channels = payload.channels;
-        state.filteredChannels = [...state.channels];
-        QuantumSessionStore.saveChannels(state.channels);
+        if (!state.channels || state.channels.length <= payload.channels.length || state.channels.length <= 5) {
+          state.channels = payload.channels;
+          state.filteredChannels = [...state.channels];
+          QuantumSessionStore.saveChannels(state.channels);
+        }
       }
 
       if (payload.session) {
@@ -3916,6 +3924,15 @@
       }
 
       if (state.isRemoteClient) {
+        if (state.channels.length <= 5) {
+          const creds = getXtreamCredentials();
+          if (creds && creds.host && creds.username && creds.password) {
+            try {
+              await xtreamConnector.fetchXtreamPlaylist(creds.host, creds.username, creds.password);
+              QuantumSessionStore.saveChannels(state.channels);
+            } catch (e) {}
+          }
+        }
         renderRemoteChannelsList();
         renderRemoteFavsList();
       }
@@ -4670,11 +4687,25 @@
         }
 
         const savedChannels = QuantumSessionStore.loadChannels();
-        if (savedChannels && savedChannels.length > 0) {
+        if (savedChannels && savedChannels.length > 5) {
           state.channels = savedChannels;
           state.filteredChannels = [...state.channels];
+          renderRemoteChannelsList();
+          renderRemoteFavsList();
+        } else {
+          const creds = getXtreamCredentials();
+          if (creds && creds.host && creds.username && creds.password) {
+            xtreamConnector.fetchXtreamPlaylist(creds.host, creds.username, creds.password).then(() => {
+              QuantumSessionStore.saveChannels(state.channels);
+              renderRemoteChannelsList();
+              renderRemoteFavsList();
+            }).catch(() => {
+              renderRemoteChannelsList();
+            });
+          } else {
+            renderRemoteChannelsList();
+          }
         }
-        renderRemoteChannelsList();
       }
     }
 
