@@ -3,10 +3,12 @@ package com.quantum.iptv;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.Toast;
 
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
@@ -28,6 +30,20 @@ import okhttp3.Response;
 public class MainActivity extends BridgeActivity {
 
     private OkHttpClient httpClient;
+    private long lastBackPressTime = 0;
+    private Toast exitToast;
+
+    public class AndroidTvNativeBridge {
+        @JavascriptInterface
+        public void exitApp() {
+            runOnUiThread(() -> MainActivity.this.finish());
+        }
+
+        @JavascriptInterface
+        public void showToast(String message) {
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+        }
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -52,9 +68,116 @@ public class MainActivity extends BridgeActivity {
             settings.setJavaScriptCanOpenWindowsAutomatically(true);
             settings.setUserAgentString("Mozilla/5.0 (Linux; Android 12; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 QuantTV/2.0 LibVLC/3.0.18");
 
+            // Expose native bridge to JavaScript
+            webView.addJavascriptInterface(new AndroidTvNativeBridge(), "AndroidTvNative");
+
+            // Ensure WebView can take D-Pad focus cleanly on Android TV hardware
+            webView.setFocusable(true);
+            webView.setFocusableInTouchMode(true);
+            webView.requestFocus();
+
             TvWebViewClient tvClient = new TvWebViewClient(this.getBridge());
             this.getBridge().setWebViewClient(tvClient);
             webView.setWebViewClient(tvClient);
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            int keyCode = event.getKeyCode();
+            WebView webView = this.getBridge().getWebView();
+
+            if (webView != null) {
+                switch (keyCode) {
+                    case KeyEvent.KEYCODE_BACK:
+                        // Forward BACK to JS handler (closes modals, exits fullscreen, or handles double-tap exit)
+                        webView.evaluateJavascript("window.handleAndroidTvBack ? window.handleAndroidTvBack() : false;", value -> {
+                            if (!"true".equals(value)) {
+                                runOnUiThread(this::handleNativeBackExit);
+                            }
+                        });
+                        return true;
+
+                    case KeyEvent.KEYCODE_CHANNEL_UP:
+                        webView.evaluateJavascript("window.playNextWorkingChannel && window.playNextWorkingChannel();", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                        webView.evaluateJavascript("window.playPreviousChannel && window.playPreviousChannel();", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                    case KeyEvent.KEYCODE_MEDIA_PLAY:
+                    case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                        webView.evaluateJavascript("window.togglePlayPause && window.togglePlayPause();", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                        webView.evaluateJavascript("window.seekVideo && window.seekVideo(10);", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_MEDIA_REWIND:
+                        webView.evaluateJavascript("window.seekVideo && window.seekVideo(-10);", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_GUIDE:
+                    case KeyEvent.KEYCODE_MENU:
+                    case KeyEvent.KEYCODE_INFO:
+                        webView.evaluateJavascript("window.toggleTvGuide && window.toggleTvGuide();", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_PROG_RED:
+                        webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('red');", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_PROG_GREEN:
+                        webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('green');", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_PROG_YELLOW:
+                        webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('yellow');", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_PROG_BLUE:
+                        webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('blue');", null);
+                        return true;
+                }
+
+                // Handle direct 0-9 numeric channel dialing on TV remotes
+                if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
+                    int digit = keyCode - KeyEvent.KEYCODE_0;
+                    webView.evaluateJavascript("window.handleTvDigitKey && window.handleTvDigitKey(" + digit + ");", null);
+                    return true;
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public void onBackPressed() {
+        WebView webView = this.getBridge().getWebView();
+        if (webView != null) {
+            webView.evaluateJavascript("window.handleAndroidTvBack ? window.handleAndroidTvBack() : false;", value -> {
+                if (!"true".equals(value)) {
+                    runOnUiThread(this::handleNativeBackExit);
+                }
+            });
+        } else {
+            handleNativeBackExit();
+        }
+    }
+
+    private void handleNativeBackExit() {
+        long now = System.currentTimeMillis();
+        if (now - lastBackPressTime < 2500) {
+            if (exitToast != null) exitToast.cancel();
+            finish();
+        } else {
+            lastBackPressTime = now;
+            exitToast = Toast.makeText(this, "Press BACK again to exit Quant TV", Toast.LENGTH_SHORT);
+            exitToast.show();
         }
     }
 

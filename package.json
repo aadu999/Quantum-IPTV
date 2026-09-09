@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "sync:android": "npx cap sync android",
-    "build:apk": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug"
+    "build:apk": "npm run build && npx cap sync android && cd android && export ANDROID_HOME=${ANDROID_HOME:-/home/adarsh/Android/Sdk} && ./gradlew assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
