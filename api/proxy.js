@@ -1,6 +1,32 @@
 export default async function handler(req, res) {
-  const targetUrl = req.query.url;
-  if (!targetUrl) return res.status(400).send("Missing URL parameter");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type");
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Robust target URL extraction to preserve all query string parameters (username, password, action)
+  let targetUrl = null;
+  if (req.url && req.url.includes('?url=')) {
+    const rawParam = req.url.substring(req.url.indexOf('?url=') + 5);
+    if (rawParam) {
+      try {
+        targetUrl = decodeURIComponent(rawParam);
+      } catch (e) {
+        targetUrl = rawParam;
+      }
+    }
+  }
+  if (!targetUrl && req.query && req.query.url) {
+    targetUrl = req.query.url;
+  }
+
+  if (!targetUrl) {
+    return res.status(400).json({ error: "Missing URL parameter" });
+  }
 
   try {
     const headers = {
@@ -14,13 +40,8 @@ export default async function handler(req, res) {
 
     const response = await fetch(targetUrl, {
       headers,
-      signal: AbortSignal.timeout(30000)
+      signal: AbortSignal.timeout(35000)
     });
-
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type");
 
     if (response.headers.get("content-type")) {
       res.setHeader("Content-Type", response.headers.get("content-type"));
@@ -37,7 +58,6 @@ export default async function handler(req, res) {
     const buffer = await response.arrayBuffer();
     res.send(Buffer.from(buffer));
   } catch (err) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.status(502).json({ error: "Failed to proxy media stream", message: err.message });
+    res.status(502).json({ error: "Failed to proxy request", message: err.message, targetUrl });
   }
 }
