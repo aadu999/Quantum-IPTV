@@ -2004,10 +2004,30 @@
       return { host: (host || 'http://ns106911.ip-51-81-106.us:25461').replace(/\/+$/, ''), username: user || '000018', password: pass || '11111' };
     }
 
-    function getXtreamCredentials() {
+    function getXtreamCredentials(channel = null) {
       let host = state.lastXtreamHost || (document.getElementById('rem-xtream-host')?.value || document.getElementById('input-xtream-host')?.value || '').trim();
       let user = state.lastXtreamUser || (document.getElementById('rem-xtream-user')?.value || document.getElementById('input-xtream-user')?.value || '').trim();
       let pass = state.lastXtreamPass || (document.getElementById('rem-xtream-pass')?.value || document.getElementById('input-xtream-pass')?.value || '').trim();
+
+      if ((!host || !user || !pass) && typeof QuantumSessionStore !== 'undefined') {
+        const session = QuantumSessionStore.loadSession();
+        if (session) {
+          host = host || session.xtreamHost;
+          user = user || session.xtreamUser;
+          pass = pass || session.xtreamPass;
+        }
+      }
+
+      if ((!host || !user || !pass) && channel && channel.url) {
+        try {
+          const match = channel.url.match(/^(https?:\/\/[^\/]+)\/(?:series|movie|live)\/([^\/]+)\/([^\/]+)/i);
+          if (match) {
+            host = host || match[1];
+            user = user || match[2];
+            pass = pass || match[3];
+          }
+        } catch(e) {}
+      }
 
       if ((!host || !user || !pass) && state.channels && state.channels.length > 0) {
         const sampleCh = state.channels.find(c => c.url && (c.url.includes('/series/') || c.url.includes('/movie/') || c.url.includes('/live/')));
@@ -2024,7 +2044,11 @@
         }
       }
 
-      return parseXtreamInput(host, user, pass);
+      const parsed = parseXtreamInput(host, user, pass);
+      if (parsed.host) state.lastXtreamHost = parsed.host;
+      if (parsed.username) state.lastXtreamUser = parsed.username;
+      if (parsed.password) state.lastXtreamPass = parsed.password;
+      return parsed;
     }
 
     function attachXtreamAutoParse(hostId, userId, passId) {
@@ -2205,11 +2229,13 @@
         return addedCount;
       }
 
-      async fetchSeriesInfo(seriesId) {
-        if (!seriesId || !state.lastXtreamHost || !state.lastXtreamUser || !state.lastXtreamPass) return null;
-        const host = state.lastXtreamHost;
-        const username = state.lastXtreamUser;
-        const password = state.lastXtreamPass;
+      async fetchSeriesInfo(seriesId, channel = null) {
+        if (!seriesId) return null;
+        const creds = getXtreamCredentials(channel);
+        if (!creds || !creds.host || !creds.username || !creds.password) return null;
+        const host = creds.host;
+        const username = creds.username;
+        const password = creds.password;
         const infoUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`;
         try {
           const text = await fetchWithProxyFallback(infoUrl);
@@ -2220,11 +2246,13 @@
         }
       }
 
-      async fetchVodInfo(vodId) {
-        if (!vodId || !state.lastXtreamHost || !state.lastXtreamUser || !state.lastXtreamPass) return null;
-        const host = state.lastXtreamHost;
-        const username = state.lastXtreamUser;
-        const password = state.lastXtreamPass;
+      async fetchVodInfo(vodId, channel = null) {
+        if (!vodId) return null;
+        const creds = getXtreamCredentials(channel);
+        if (!creds || !creds.host || !creds.username || !creds.password) return null;
+        const host = creds.host;
+        const username = creds.username;
+        const password = creds.password;
         const infoUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_info&vod_id=${encodeURIComponent(vodId)}`;
         try {
           const text = await fetchWithProxyFallback(infoUrl);
@@ -2856,7 +2884,7 @@
       modal.classList.remove('hidden');
 
       if (channel.seriesId && xtreamConnector) {
-        const info = await xtreamConnector.fetchSeriesInfo(channel.seriesId);
+        const info = await xtreamConnector.fetchSeriesInfo(channel.seriesId, channel);
         currentSeriesInfoCache = info;
         if (info && info.episodes && Object.keys(info.episodes).length > 0) {
           renderSeriesSeasonsAndEpisodes(info);
@@ -2932,9 +2960,10 @@
       }
 
       const episodes = currentSeriesInfoCache.episodes[seasonNum] || [];
-      const host = state.lastXtreamHost || '';
-      const username = state.lastXtreamUser || '';
-      const password = state.lastXtreamPass || '';
+      const creds = getXtreamCredentials();
+      const host = creds.host || state.lastXtreamHost || '';
+      const username = creds.username || state.lastXtreamUser || '';
+      const password = creds.password || state.lastXtreamPass || '';
 
       const gridHtml = episodes.map(ep => {
         const ext = ep.container_extension || 'mkv';
@@ -4452,7 +4481,7 @@
       modal.classList.remove('hidden');
 
       if (seriesId && xtreamConnector) {
-        const info = await xtreamConnector.fetchSeriesInfo(seriesId);
+        const info = await xtreamConnector.fetchSeriesInfo(seriesId, ch);
         if (info && info.episodes && Object.keys(info.episodes).length > 0) {
           remoteCurrentSeriesCache = { info, channel: ch };
           renderRemoteSeriesSeasonsAndEpisodes(info, ch);
@@ -4505,11 +4534,14 @@
 
       const episodes = remoteCurrentSeriesCache.info.episodes[seasonNum] || [];
       const ch = remoteCurrentSeriesCache.channel;
-      const creds = getXtreamCredentials();
+      const creds = getXtreamCredentials(ch);
+      const host = creds.host || creds.user ? creds.host : state.lastXtreamHost;
+      const user = creds.username || state.lastXtreamUser;
+      const pass = creds.password || state.lastXtreamPass;
 
       const epListHtml = episodes.map(ep => {
         const ext = ep.container_extension || 'mp4';
-        const epUrl = `${creds.host}/series/${creds.user}/${creds.pass}/${ep.id}.${ext}`;
+        const epUrl = `${host}/series/${user}/${pass}/${ep.id}.${ext}`;
         const title = ep.title || `Episode ${ep.episode_num || ''}`;
         const epCode = `S${String(seasonNum).padStart(2, '0')}E${String(ep.episode_num || 1).padStart(2, '0')}`;
         const safeTitle = (ch.name + ' - ' + epCode + ' ' + title).replace(/'/g, "\\'");

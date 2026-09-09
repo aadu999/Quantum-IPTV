@@ -30,8 +30,9 @@ export default async function handler(req, res) {
 
   try {
     const headers = {
-      'User-Agent': 'IPTVSmartersPlayer/3.1.5 (Linux; Android 11)',
-      'Accept': '*/*'
+      'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
+      'Accept': '*/*',
+      'Connection': 'keep-alive'
     };
 
     if (req.headers.range) {
