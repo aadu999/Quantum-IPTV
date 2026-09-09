@@ -4256,7 +4256,7 @@
         if (cat === 'ALL') {
           matchesCat = true;
         } else if (cat === 'MOVIES') {
-          matchesCat = (ch.type === 'vod' || ch.isVod === true || (ch.group && /movie|vod|cinema|film/i.test(ch.group)) || (ch.url && (ch.url.includes('/movie/') || (/\.(mkv|mp4|avi)$/i.test(ch.url))) && ch.type !== 'series'));
+          matchesCat = (ch.type === 'vod' || ch.vodId || ch.isVod === true || (ch.group && /^vod/i.test(ch.group)) || (ch.url && ch.url.includes('/movie/')));
         } else if (cat === 'SERIES') {
           matchesCat = (ch.type === 'series' || ch.seriesId || (ch.group && /series|shows|seasons/i.test(ch.group)) || (ch.url && ch.url.includes('/series/')));
         } else if (cat === 'LIVE') {
