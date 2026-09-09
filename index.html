@@ -959,7 +959,7 @@
       <!-- Remote Category Filter Pills -->
       <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
         <button onclick="setRemoteCategory('ALL')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-brand-600 text-white font-medium whitespace-nowrap" data-cat="ALL">All</button>
-        <button onclick="setRemoteCategory('MOVIES')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="MOVIES">🎬 Movies</button>
+        <button onclick="setRemoteCategory('MOVIES')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="MOVIES">🎬 VOD Movies</button>
         <button onclick="setRemoteCategory('SERIES')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="SERIES">🍿 Series</button>
         <button onclick="setRemoteCategory('LIVE')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="LIVE">📺 Live TV</button>
         <button onclick="setRemoteCategory('IN')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800" data-cat="IN">India (Asianet)</button>
@@ -4270,6 +4270,20 @@
         return matchesSearch && matchesCat;
       });
 
+      if (cat === 'MOVIES') {
+        list.sort((a, b) => {
+          const aIsVod = (a.type === 'vod' || a.vodId || (a.url && a.url.includes('/movie/'))) ? 1 : 0;
+          const bIsVod = (b.type === 'vod' || b.vodId || (b.url && b.url.includes('/movie/'))) ? 1 : 0;
+          return bIsVod - aIsVod;
+        });
+      } else if (cat === 'SERIES') {
+        list.sort((a, b) => {
+          const aIsSeries = (a.type === 'series' || a.seriesId || (a.url && a.url.includes('/series/'))) ? 1 : 0;
+          const bIsSeries = (b.type === 'series' || b.seriesId || (b.url && b.url.includes('/series/'))) ? 1 : 0;
+          return bIsSeries - aIsSeries;
+        });
+      }
+
       if (list.length === 0) {
         container.innerHTML = `
           <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
@@ -4705,8 +4719,9 @@
 
         const savedChannels = QuantumSessionStore.loadChannels();
         const hasSeries = savedChannels && savedChannels.some(c => c.type === 'series' || c.seriesId || (c.url && c.url.includes('/series/')));
+        const hasVod = savedChannels && savedChannels.some(c => c.type === 'vod' || c.vodId || (c.url && c.url.includes('/movie/')));
 
-        if (savedChannels && savedChannels.length > 5 && hasSeries) {
+        if (savedChannels && savedChannels.length > 5 && hasSeries && hasVod) {
           state.channels = savedChannels;
           state.filteredChannels = [...state.channels];
           renderRemoteChannelsList();
