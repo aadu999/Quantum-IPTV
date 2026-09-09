@@ -3645,7 +3645,7 @@
           if (countBadge) countBadge.textContent = `${state.channels.length.toLocaleString()} Channels Active`;
           
           if (!isBackground && !state.isRemoteClient) {
-            playChannel(0);
+            playChannel(0, { directPlay: true });
             closeModals();
           }
 
@@ -5549,7 +5549,7 @@
         if (savedSession && typeof savedSession.lastChannelIndex === 'number' && savedSession.lastChannelIndex >= 0 && savedSession.lastChannelIndex < state.filteredChannels.length) {
           initialIndex = savedSession.lastChannelIndex;
         }
-        playChannel(initialIndex);
+        playChannel(initialIndex, { directPlay: true });
 
         // 4. Background re-sync for active provider session
         if (savedSession && savedSession.providerType === 'xtream' && savedSession.xtreamHost && savedSession.xtreamUser && savedSession.xtreamPass) {
