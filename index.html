@@ -1417,7 +1417,12 @@
       saveChannels(channels) {
         try {
           if (!channels || !Array.isArray(channels) || channels.length === 0) return;
-          const toSave = channels.slice(0, 5000).map(c => ({
+          const series = channels.filter(c => c.type === 'series' || c.seriesId || (c.url && c.url.includes('/series/')));
+          const movies = channels.filter(c => c.type === 'vod' || c.vodId || (c.url && c.url.includes('/movie/')));
+          const live = channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId);
+
+          const ordered = [...series, ...movies, ...live];
+          const toSave = ordered.slice(0, 6000).map(c => ({
             id: c.id,
             name: c.name,
             url: c.url,
@@ -1426,8 +1431,15 @@
             language: c.language,
             country: c.country,
             type: c.type,
+            seriesId: c.seriesId,
             vodId: c.vodId,
+            cover: c.cover,
+            plot: c.plot,
             rating: c.rating,
+            cast: c.cast,
+            director: c.director,
+            genre: c.genre,
+            releaseDate: c.releaseDate,
             program: c.program,
             sources: c.sources
           }));
@@ -2058,71 +2070,12 @@
             try { data = JSON.parse(authText); } catch(e) {}
 
             if (data && data.user_info && data.user_info.auth !== 0) {
-              // Fetch Live Streams
-              try {
-                const liveUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
-                const liveText = await fetchWithProxyFallback(liveUrl);
-                const liveStreams = JSON.parse(liveText);
-                if (Array.isArray(liveStreams)) {
-                  liveStreams.forEach(item => {
-                    const streamUrl = `${host}/live/${username}/${password}/${item.stream_id}.m3u8`;
-                    const ch = {
-                      id: 'xt_live_' + item.stream_id,
-                      name: item.name,
-                      url: streamUrl,
-                      logo: item.stream_icon,
-                      group: item.category_name || 'Xtream Live',
-                      language: inferChannelLanguage(item.name),
-                      type: 'live',
-                      tvgId: item.epg_channel_id
-                    };
-                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
-                    if (!state.channels.includes(fused)) {
-                      state.channels.push(fused);
-                      addedCount++;
-                    }
-                  });
-                }
-              } catch (e) {
-                console.warn('Xtream Live Streams JSON fetch warning:', e.message);
-              }
-
-              // Fetch VOD Movies
-              try {
-                const vodUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_streams`;
-                const vodText = await fetchWithProxyFallback(vodUrl);
-                const vodStreams = JSON.parse(vodText);
-                if (Array.isArray(vodStreams)) {
-                  vodStreams.slice(0, 200).forEach(item => {
-                    const vodStreamUrl = `${host}/movie/${username}/${password}/${item.stream_id}.${item.container_extension || 'mp4'}`;
-                    const ch = {
-                      id: 'xt_vod_' + item.stream_id,
-                      name: item.name,
-                      url: vodStreamUrl,
-                      logo: item.stream_icon,
-                      vodId: item.stream_id,
-                      group: 'VOD Movies',
-                      language: inferChannelLanguage(item.name),
-                      type: 'vod',
-                      rating: item.rating
-                    };
-                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream VOD');
-                    if (!state.channels.includes(fused)) {
-                      state.channels.push(fused);
-                      addedCount++;
-                    }
-                  });
-                }
-              } catch (e) {
-                console.warn('Xtream VOD JSON fetch warning:', e.message);
-              }
-
-              // Store Xtream credentials for Series Info lookups
+              // Store Xtream credentials for Series & VOD Info lookups
               state.lastXtreamHost = host;
               state.lastXtreamUser = username;
               state.lastXtreamPass = password;
 
-              // Fetch TV Series
+              // Fetch TV Series (Prioritized First)
               try {
                 const seriesUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series`;
                 const seriesText = await fetchWithProxyFallback(seriesUrl);
@@ -2156,6 +2109,65 @@
                 }
               } catch (e) {
                 console.warn('Xtream Series JSON fetch warning:', e.message);
+              }
+
+              // Fetch VOD Movies
+              try {
+                const vodUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_vod_streams`;
+                const vodText = await fetchWithProxyFallback(vodUrl);
+                const vodStreams = JSON.parse(vodText);
+                if (Array.isArray(vodStreams)) {
+                  vodStreams.slice(0, 200).forEach(item => {
+                    const vodStreamUrl = `${host}/movie/${username}/${password}/${item.stream_id}.${item.container_extension || 'mp4'}`;
+                    const ch = {
+                      id: 'xt_vod_' + item.stream_id,
+                      name: item.name,
+                      url: vodStreamUrl,
+                      logo: item.stream_icon,
+                      vodId: item.stream_id,
+                      group: 'VOD Movies',
+                      language: inferChannelLanguage(item.name),
+                      type: 'vod',
+                      rating: item.rating
+                    };
+                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream VOD');
+                    if (!state.channels.includes(fused)) {
+                      state.channels.push(fused);
+                      addedCount++;
+                    }
+                  });
+                }
+              } catch (e) {
+                console.warn('Xtream VOD JSON fetch warning:', e.message);
+              }
+
+              // Fetch Live Streams
+              try {
+                const liveUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
+                const liveText = await fetchWithProxyFallback(liveUrl);
+                const liveStreams = JSON.parse(liveText);
+                if (Array.isArray(liveStreams)) {
+                  liveStreams.forEach(item => {
+                    const streamUrl = `${host}/live/${username}/${password}/${item.stream_id}.m3u8`;
+                    const ch = {
+                      id: 'xt_live_' + item.stream_id,
+                      name: item.name,
+                      url: streamUrl,
+                      logo: item.stream_icon,
+                      group: item.category_name || 'Xtream Live',
+                      language: inferChannelLanguage(item.name),
+                      type: 'live',
+                      tvgId: item.epg_channel_id
+                    };
+                    const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
+                    if (!state.channels.includes(fused)) {
+                      state.channels.push(fused);
+                      addedCount++;
+                    }
+                  });
+                }
+              } catch (e) {
+                console.warn('Xtream Live Streams JSON fetch warning:', e.message);
               }
             }
           } catch (e) {
@@ -3886,8 +3898,13 @@
       if (state.isRemoteClient) return;
 
       const session = QuantumSessionStore.loadSession();
+      const series = state.channels ? state.channels.filter(c => c.type === 'series' || c.seriesId || (c.url && c.url.includes('/series/'))) : [];
+      const movies = state.channels ? state.channels.filter(c => c.type === 'vod' || c.vodId || (c.url && c.url.includes('/movie/'))) : [];
+      const live = state.channels ? state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId) : [];
+
+      const ordered = [...series, ...movies, ...live];
       const catalogData = {
-        channels: state.channels ? state.channels.slice(0, 5000) : [],
+        channels: ordered.slice(0, 6000),
         session: session
       };
 
@@ -3895,7 +3912,7 @@
       if (mqttClient && mqttClient.connected) {
         // Send lightweight catalog payload over MQTT to stay well below 256KB broker payload limit
         const lightCatalog = {
-          channels: state.channels ? state.channels.slice(0, 100) : [],
+          channels: ordered.slice(0, 200),
           channelCount: state.channels ? state.channels.length : 0,
           session: session
         };
@@ -4687,7 +4704,9 @@
         }
 
         const savedChannels = QuantumSessionStore.loadChannels();
-        if (savedChannels && savedChannels.length > 5) {
+        const hasSeries = savedChannels && savedChannels.some(c => c.type === 'series' || c.seriesId || (c.url && c.url.includes('/series/')));
+
+        if (savedChannels && savedChannels.length > 5 && hasSeries) {
           state.channels = savedChannels;
           state.filteredChannels = [...state.channels];
           renderRemoteChannelsList();
