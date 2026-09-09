@@ -954,7 +954,7 @@
     </header>
 
     <!-- Remote Screen Body: D-Pad & Main Controls -->
-    <div id="remote-body-pad" class="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-between gap-3.5 bg-gradient-to-b from-[#060913] via-[#090d1a] to-[#04060c]">
+    <div id="remote-body-pad" class="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col items-center justify-between gap-3.5 bg-gradient-to-b from-[#060913] via-[#090d1a] to-[#04060c] touch-pan-y" style="-webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;">
       
       <!-- Currently Playing Card on Quant TV -->
       <div class="w-full quant-glass-card rounded-2xl p-3 flex items-center justify-between shadow-2xl relative overflow-hidden group">
@@ -1080,9 +1080,9 @@
     </div>
 
     <!-- Channels Screen on Mobile Remote (PINNED SEARCH ON TOP) -->
-    <div id="remote-body-channels" class="flex-1 overflow-hidden hidden flex-col">
+    <div id="remote-body-channels" class="flex-1 min-h-0 overflow-hidden hidden flex flex-col">
       <!-- Sticky Header: Search Bar & Filter Pills (ALWAYS PINNED ON TOP) -->
-      <div class="p-3 pb-2 bg-slate-950/95 border-b border-slate-800/80 shrink-0 flex flex-col gap-2 backdrop-blur-md">
+      <div class="p-3 pb-2 bg-slate-950/95 border-b border-slate-800/80 shrink-0 flex flex-col gap-2 backdrop-blur-md z-10">
         <div class="relative flex items-center">
           <i class="fa-solid fa-magnifying-glass absolute left-3 text-xs text-slate-500"></i>
           <input id="remote-search-input" type="text" placeholder="Search channels, movies, sports..." class="w-full bg-slate-900/90 text-slate-200 text-xs rounded-xl pl-8 pr-8 py-2.5 border border-slate-800 focus:outline-none focus:border-brand-500 placeholder-slate-500 transition">
@@ -1104,24 +1104,24 @@
       </div>
 
       <!-- Scrollable Channels Render Area (Scrolls independently below the pinned search) -->
-      <div id="remote-channels-render" class="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5 divide-y divide-slate-800/60 overscroll-contain"></div>
+      <div id="remote-channels-render" class="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-1.5 divide-y divide-slate-800/60 touch-pan-y" style="-webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;"></div>
       <button id="remote-load-more" onclick="loadMoreRemoteChannels()" class="mx-3 my-2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded-xl font-medium border border-slate-800 hidden shrink-0">
         Load More Channels...
       </button>
     </div>
 
     <!-- Favorites Screen on Mobile Remote -->
-    <div id="remote-body-favs" class="flex-1 overflow-y-auto p-3 hidden flex-col gap-2">
+    <div id="remote-body-favs" class="flex-1 min-h-0 overflow-y-auto p-3 hidden flex flex-col gap-2 touch-pan-y" style="-webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;">
       <div id="remote-favs-render" class="flex flex-col gap-1.5 divide-y divide-slate-800/60"></div>
     </div>
 
     <!-- EPG Schedule on Mobile Remote -->
-    <div id="remote-body-epg" class="flex-1 overflow-y-auto p-3 hidden flex-col gap-2">
+    <div id="remote-body-epg" class="flex-1 min-h-0 overflow-y-auto p-3 hidden flex flex-col gap-2 touch-pan-y" style="-webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;">
       <div id="remote-epg-render" class="flex flex-col gap-2"></div>
     </div>
 
     <!-- Provider & M3U Config Screen on Mobile Remote -->
-    <div id="remote-body-config" class="flex-1 overflow-y-auto p-3.5 hidden flex-col gap-3">
+    <div id="remote-body-config" class="flex-1 min-h-0 overflow-y-auto p-3.5 hidden flex flex-col gap-3 touch-pan-y" style="-webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3 shadow-xl">
         <div class="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
           <div class="flex items-center gap-2">

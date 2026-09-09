@@ -524,6 +524,8 @@ export function setRemoteCategory(cat: string): void {
     }
   });
   state.remoteLimit = 60;
+  const container = document.getElementById('remote-channels-render');
+  if (container) container.scrollTop = 0;
   (window as any).renderRemoteChannelsList?.();
 }
 
@@ -650,6 +652,9 @@ export function checkAndLaunchRemoteView(): void {
     const remSearch = document.getElementById('remote-search-input') as HTMLInputElement | null;
     if (remSearch) {
       remSearch.addEventListener('input', () => {
+        state.remoteLimit = 60;
+        const container = document.getElementById('remote-channels-render');
+        if (container) container.scrollTop = 0;
         (window as any).renderRemoteChannelsList?.();
       });
     }

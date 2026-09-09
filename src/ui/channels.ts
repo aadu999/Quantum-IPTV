@@ -390,8 +390,9 @@ export function renderRemoteChannelsList(): void {
 
   const sliceLimit = state.remoteLimit || 60;
   const displayChannels = list.slice(0, sliceLimit);
+  const hasMore = list.length > sliceLimit;
 
-  container.innerHTML = displayChannels
+  let html = displayChannels
     .map(ch => {
       const isFav = state.favorites.includes(ch.id);
       const safeName = (ch.name || 'Stream Channel').replace(/'/g, "\\'");
@@ -437,8 +438,41 @@ export function renderRemoteChannelsList(): void {
     })
     .join('');
 
+  if (hasMore) {
+    html += `
+      <div class="py-3 flex justify-center shrink-0">
+        <button onclick="window.loadMoreRemoteChannels()" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 active:scale-95 text-slate-300 text-xs rounded-xl font-medium border border-slate-800 transition flex items-center justify-center gap-2 shadow-lg">
+          <i class="fa-solid fa-arrow-down text-brand-400 text-xs"></i>
+          <span>Load More Channels (${list.length - sliceLimit} remaining)...</span>
+        </button>
+      </div>
+    `;
+  } else if (list.length > 20) {
+    html += `
+      <div class="py-4 text-center text-[10px] text-slate-500 font-mono shrink-0">
+        All ${list.length} channels loaded
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+
+  // Auto-infinite scroll when scrolling near bottom
+  if (!container.dataset.hasScrollListener) {
+    container.dataset.hasScrollListener = 'true';
+    container.addEventListener('scroll', () => {
+      if (container.scrollTop + container.clientHeight >= container.scrollHeight - 250) {
+        const curLimit = state.remoteLimit || 60;
+        if (curLimit < list.length) {
+          state.remoteLimit = curLimit + 60;
+          renderRemoteChannelsList();
+        }
+      }
+    }, { passive: true });
+  }
+
   if (loadMoreBtn) {
-    loadMoreBtn.classList.toggle('hidden', list.length <= sliceLimit);
+    loadMoreBtn.classList.add('hidden');
   }
 }
 
@@ -722,6 +756,9 @@ export function clearRemoteSearch(): void {
   if (searchInput) {
     searchInput.value = '';
     if (clearBtn) clearBtn.classList.add('hidden');
+    state.remoteLimit = 60;
+    const container = document.getElementById('remote-channels-render');
+    if (container) container.scrollTop = 0;
     renderRemoteChannelsList();
     searchInput.focus();
   }
