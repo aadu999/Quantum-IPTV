@@ -1062,28 +1062,34 @@
       </div>
     </div>
 
-    <!-- Mobile Remote Bottom Tabs -->
-    <nav class="h-16 bg-slate-900/95 border-t border-slate-800 flex items-center justify-around px-2 shrink-0">
-      <button id="rem-nav-pad" class="flex-1 py-1 text-brand-400 flex flex-col items-center gap-1 text-[10px] font-semibold">
+    <!-- Mobile Remote Bottom Navigation Bar -->
+    <nav class="h-16 bg-slate-900/95 border-t border-slate-800 flex items-center justify-around px-1 shrink-0 z-40">
+      <button id="rem-nav-pad" class="flex-1 py-1 text-brand-400 flex flex-col items-center gap-1 text-[10px] font-semibold transition">
         <i class="fa-solid fa-gamepad text-base"></i>
         <span>Remote</span>
       </button>
-      <button id="rem-nav-channels" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+      <button id="rem-nav-channels" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold transition">
         <i class="fa-solid fa-tv text-base"></i>
-        <span>Channels</span>
+        <span>Live TV</span>
       </button>
-      <button id="rem-nav-favs" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+      <button id="rem-nav-movies" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold transition">
+        <i class="fa-solid fa-film text-base"></i>
+        <span>Movies</span>
+      </button>
+      <button id="rem-nav-series" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold transition">
+        <i class="fa-solid fa-layer-group text-base"></i>
+        <span>Series</span>
+      </button>
+      <button id="rem-nav-favs" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold transition">
         <i class="fa-solid fa-star text-base"></i>
-        <span>Favorites</span>
+        <span>Favs</span>
       </button>
-      <button id="rem-nav-epg" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
-        <i class="fa-solid fa-calendar-days text-base"></i>
-        <span>Schedule</span>
-      </button>
-      <button id="rem-nav-config" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold">
+      <button id="rem-nav-config" class="flex-1 py-1 text-slate-400 hover:text-white flex flex-col items-center gap-1 text-[10px] font-semibold transition">
         <i class="fa-solid fa-sliders text-base"></i>
-        <span>Providers</span>
+        <span>Setup</span>
       </button>
+    </nav>
+
     <!-- Mobile Remote VOD Movie Detail Modal -->
     <div id="rem-modal-movie" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col justify-end p-0 transition-all">
       <div class="bg-slate-900 border-t border-slate-800 rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto flex flex-col gap-4 text-left">
@@ -1111,9 +1117,14 @@
 
         <p id="rem-movie-plot" class="text-xs text-slate-300 leading-relaxed max-h-24 overflow-y-auto pr-1">High definition video stream. Tap below to start playing on TV.</p>
 
-        <button id="rem-btn-play-movie" class="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-brand-600/30 flex items-center justify-center gap-2 transition">
-          <i class="fa-solid fa-play"></i> Play Movie on Smart TV
-        </button>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="rem-btn-cast-movie" class="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 transition">
+            <i class="fa-solid fa-tv text-brand-400"></i> Open on TV
+          </button>
+          <button id="rem-btn-play-movie" class="py-3 rounded-xl bg-brand-600 hover:bg-brand-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-brand-600/30 flex items-center justify-center gap-2 transition">
+            <i class="fa-solid fa-play"></i> Play Movie
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1139,13 +1150,16 @@
             </div>
             <div id="rem-series-genre" class="text-[11px] text-slate-400 truncate">TV Series</div>
             <div id="rem-series-cast" class="text-[11px] text-slate-500 truncate">Starring ensemble cast</div>
+            <button id="rem-btn-cast-series" class="mt-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-brand-400 font-bold text-[10px] border border-slate-700 flex items-center gap-1 self-start">
+              <i class="fa-solid fa-tv"></i> Cast Explorer to Smart TV
+            </button>
           </div>
         </div>
 
         <p id="rem-series-plot" class="text-xs text-slate-300 leading-relaxed max-h-20 overflow-y-auto pr-1">Series description...</p>
 
         <!-- Season selector tabs -->
-        <div id="rem-series-season-tabs" class="flex gap-2 overflow-x-auto py-1 scrollbar-none">
+        <div id="rem-series-season-tabs" class="flex gap-2 overflow-x-auto py-1 no-scrollbar">
           <!-- Season pills rendered dynamically -->
         </div>
 
@@ -1155,8 +1169,6 @@
         </div>
       </div>
     </div>
-
-    </nav>
   </div>
 
   <script>
@@ -3963,6 +3975,24 @@
             handleRemoteProviderConfig(msg.payload);
           }
           break;
+        case 'OPEN_SERIES_EXPLORER':
+          if (msg.payload) {
+            const seriesId = msg.payload.seriesId || msg.payload.id;
+            const ch = state.channels.find(c => c.id === msg.payload.id || c.seriesId == seriesId);
+            if (ch && typeof openSeriesExplorer === 'function') {
+              openSeriesExplorer(ch);
+            }
+          }
+          break;
+        case 'OPEN_MOVIE_EXPLORER':
+          if (msg.payload) {
+            const vodId = msg.payload.vodId || msg.payload.id;
+            const ch = state.channels.find(c => c.id === msg.payload.id || c.vodId == vodId);
+            if (ch && typeof openMovieExplorer === 'function') {
+              openMovieExplorer(ch);
+            }
+          }
+          break;
       }
     }
 
@@ -4246,9 +4276,17 @@
         };
       }
 
+      const vodId = ch.vodId || (ch.id && ch.id.startsWith('xt_vod_') ? ch.id.replace('xt_vod_', '') : null);
+      const btnCastMovie = document.getElementById('rem-btn-cast-movie');
+      if (btnCastMovie) {
+        btnCastMovie.onclick = () => {
+          closeRemoteMovieExplorer();
+          sendRemoteCmd('OPEN_MOVIE_EXPLORER', { id: ch.id, vodId: vodId });
+        };
+      }
+
       modal.classList.remove('hidden');
 
-      const vodId = ch.vodId || (ch.id && ch.id.startsWith('xt_vod_') ? ch.id.replace('xt_vod_', '') : null);
       if (vodId && xtreamConnector) {
         xtreamConnector.fetchVodInfo(vodId).then(infoData => {
           if (infoData && infoData.info) {
@@ -4298,13 +4336,21 @@
       if (tabs) tabs.innerHTML = `<div class="text-xs text-slate-400 p-2"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Loading seasons...</div>`;
       if (list) list.innerHTML = '';
 
-      modal.classList.remove('hidden');
-
       let seriesId = ch.seriesId;
       if (!seriesId && ch.url && ch.url.includes('/series/')) {
         const parts = ch.url.split('/');
         seriesId = parts[parts.length - 1]?.split('.')[0];
       }
+
+      const btnCastSeries = document.getElementById('rem-btn-cast-series');
+      if (btnCastSeries) {
+        btnCastSeries.onclick = () => {
+          closeRemoteSeriesExplorer();
+          sendRemoteCmd('OPEN_SERIES_EXPLORER', { id: ch.id, seriesId: seriesId });
+        };
+      }
+
+      modal.classList.remove('hidden');
 
       if (seriesId && xtreamConnector) {
         const info = await xtreamConnector.fetchSeriesInfo(seriesId);
@@ -4508,24 +4554,23 @@
 
         const navPad = document.getElementById('rem-nav-pad');
         const navChannels = document.getElementById('rem-nav-channels');
+        const navMovies = document.getElementById('rem-nav-movies');
+        const navSeries = document.getElementById('rem-nav-series');
         const navFavs = document.getElementById('rem-nav-favs');
-        const navEpg = document.getElementById('rem-nav-epg');
         const navConfig = document.getElementById('rem-nav-config');
 
         const bodyPad = document.getElementById('remote-body-pad');
         const bodyChannels = document.getElementById('remote-body-channels');
         const bodyFavs = document.getElementById('remote-body-favs');
-        const bodyEpg = document.getElementById('remote-body-epg');
         const bodyConfig = document.getElementById('remote-body-config');
 
         function switchRemoteTab(tab) {
           if (bodyPad) bodyPad.classList.toggle('hidden', tab !== 'pad');
-          if (bodyChannels) bodyChannels.classList.toggle('hidden', tab !== 'channels');
+          if (bodyChannels) bodyChannels.classList.toggle('hidden', !['channels', 'movies', 'series'].includes(tab));
           if (bodyFavs) bodyFavs.classList.toggle('hidden', tab !== 'favs');
-          if (bodyEpg) bodyEpg.classList.toggle('hidden', tab !== 'epg');
           if (bodyConfig) bodyConfig.classList.toggle('hidden', tab !== 'config');
 
-          [navPad, navChannels, navFavs, navEpg, navConfig].forEach(b => {
+          [navPad, navChannels, navMovies, navSeries, navFavs, navConfig].forEach(b => {
             if (b) {
               b.classList.remove('text-brand-400');
               b.classList.add('text-slate-400');
@@ -4535,15 +4580,19 @@
           if (tab === 'pad' && navPad) navPad.classList.add('text-brand-400');
           if (tab === 'channels' && navChannels) {
             navChannels.classList.add('text-brand-400');
-            renderRemoteChannelsList();
+            setRemoteCategory('LIVE');
+          }
+          if (tab === 'movies' && navMovies) {
+            navMovies.classList.add('text-brand-400');
+            setRemoteCategory('MOVIES');
+          }
+          if (tab === 'series' && navSeries) {
+            navSeries.classList.add('text-brand-400');
+            setRemoteCategory('SERIES');
           }
           if (tab === 'favs' && navFavs) {
             navFavs.classList.add('text-brand-400');
             renderRemoteFavsList();
-          }
-          if (tab === 'epg' && navEpg) {
-            navEpg.classList.add('text-brand-400');
-            renderRemoteEpgList();
           }
           if (tab === 'config' && navConfig) {
             navConfig.classList.add('text-brand-400');
@@ -4552,8 +4601,9 @@
 
         if (navPad) navPad.addEventListener('click', () => switchRemoteTab('pad'));
         if (navChannels) navChannels.addEventListener('click', () => switchRemoteTab('channels'));
+        if (navMovies) navMovies.addEventListener('click', () => switchRemoteTab('movies'));
+        if (navSeries) navSeries.addEventListener('click', () => switchRemoteTab('series'));
         if (navFavs) navFavs.addEventListener('click', () => switchRemoteTab('favs'));
-        if (navEpg) navEpg.addEventListener('click', () => switchRemoteTab('epg'));
         if (navConfig) navConfig.addEventListener('click', () => switchRemoteTab('config'));
 
         const remSearch = document.getElementById('remote-search-input');
