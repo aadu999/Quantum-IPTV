@@ -48,15 +48,28 @@ import {
 } from './ui/channels';
 import {
   setModalEngineInstance,
-  closeModals,
   openSeriesExplorer,
+  closeSeriesExplorer,
+  toggleSeriesExpandView,
+  selectSeriesSeason,
+  playEpisodeStream,
   openMovieExplorer,
+  closeMovieExplorer,
+  startMoviePlayback,
   openQuarantineModal,
   closeQuarantineModal,
   switchQuarantineTab,
-  copyToClipboard
+  renderQuarantineTab,
+  toggleSubtitlePopover,
+  toggleAudioPopover,
+  selectSubtitleTrack,
+  selectNativeSubtitleTrack,
+  selectAudioTrack,
+  copyToClipboard,
+  closeModals
 } from './ui/modals';
 import { showAppAlert, showAppConfirm, closeAppDialog } from './ui/dialog';
+import { initTvNavigation } from './ui/tv-navigation';
 
 // Instantiate Core Stream Engine
 const videoElement = document.getElementById('video-player') as HTMLVideoElement;
@@ -816,6 +829,8 @@ export function initApp(): void {
       loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
       loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
     }
+    // Initialize Android TV D-Pad spatial navigation
+    initTvNavigation();
   } else {
     adjustMobileVideoStage();
     const remoteLiveCount = state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId).length;

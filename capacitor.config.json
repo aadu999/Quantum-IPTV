@@ -1,0 +1,14 @@
+{
+  "appId": "com.quantum.iptv",
+  "appName": "Quant TV",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": ["*"],
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  }
+}
