@@ -306,7 +306,7 @@ export const state: State = {
   aspectIndex: 0,
   aspectModes: ['object-contain', 'object-cover', 'object-fill'],
   aspectLabels: ['16:9', 'Fill', 'Stretch'],
-  isRemoteClient: false,
+  isRemoteClient: typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('remote'),
   remoteLimit: 60,
   remoteActiveCategory: 'ALL',
   hideOfflineFeeds: false

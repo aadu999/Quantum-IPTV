@@ -27,6 +27,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.15.2/mqtt.min.js" async></script>
 
   <script>
+    // Immediate check if opened as remote controller
+    if (window.location.search.includes('remote=')) {
+      document.documentElement.classList.add('is-remote-client');
+    }
+
     // Safe global fallback icon to eliminate inline unescaped SyntaxErrors
     const FALLBACK_LOGO = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath fill='%23ffffff' d='M10 8l6 4-6 4V8z'/%3E%3C/svg%3E";
 
@@ -38,6 +43,21 @@
   </script>
 
   <style>
+    html.is-remote-client #app-boot-splash {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+    html.is-remote-client #mobile-remote-app {
+      display: flex !important;
+      z-index: 10000000 !important;
+    }
+    html.is-remote-client #video-stage,
+    html.is-remote-client #tv-header,
+    html.is-remote-client #channel-sidebar {
+      display: none !important;
+    }
     /* Absolute prevention of mobile double-tap and pinch zoom */
     html, body {
       touch-action: manipulation !important;

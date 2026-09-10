@@ -41,64 +41,91 @@ export function initRemoteSync(): void {
     sendRemoteCmd('REQUEST_SYNC');
   }
 
-  try {
-    if (typeof mqtt !== 'undefined') {
-      const clientId = (state.isRemoteClient ? 'remote_' : 'tv_') + Math.random().toString(16).substring(2, 10);
-      mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
-        clientId,
-        clean: true,
-        connectTimeout: 6000,
-        reconnectPeriod: 2500
-      });
+  function connectMqtt(retries = 0): void {
+    if (mqttClient && mqttClient.connected) return;
 
-      mqttClient.on('connect', () => {
-        const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
-        const stateTopic = `quantum_tv/${state.roomId}/state`;
-        const catalogTopic = `quantum_tv/${state.roomId}/catalog`;
-        const chunkTopic = `quantum_tv/${state.roomId}/catalog_chunk`;
-        const presenceTopic = `quantum_tv/${state.roomId}/presence`;
+    try {
+      if (typeof mqtt !== 'undefined') {
+        const clientId = (state.isRemoteClient ? 'remote_' : 'tv_') + Math.random().toString(16).substring(2, 10);
+        mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+          clientId,
+          clean: true,
+          connectTimeout: 8000,
+          reconnectPeriod: 2000
+        });
 
-        if (state.isRemoteClient) {
-          mqttClient.subscribe(stateTopic);
-          mqttClient.subscribe(catalogTopic);
-          mqttClient.subscribe(chunkTopic);
-          const statEl = document.getElementById('remote-conn-status');
-          if (statEl) statEl.textContent = 'Connected to TV';
-          mqttClient.publish(presenceTopic, JSON.stringify({ event: 'connected', sender: 'remote', roomId: state.roomId, time: Date.now() }));
-          sendRemoteCmd('REMOTE_JOINED');
-          sendRemoteCmd('REQUEST_SYNC');
-        } else {
-          mqttClient.subscribe(cmdTopic);
-          mqttClient.subscribe(presenceTopic);
-          broadcastTVState();
-          broadcastTVCatalog();
-        }
-      });
+        mqttClient.on('connect', () => {
+          const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
+          const stateTopic = `quantum_tv/${state.roomId}/state`;
+          const catalogTopic = `quantum_tv/${state.roomId}/catalog`;
+          const chunkTopic = `quantum_tv/${state.roomId}/catalog_chunk`;
+          const presenceTopic = `quantum_tv/${state.roomId}/presence`;
 
-      mqttClient.on('message', (topic: string, payload: any) => {
-        try {
-          const data = JSON.parse(payload.toString());
           if (state.isRemoteClient) {
-            if (topic.endsWith('/state')) updateRemoteStateView(data);
-            if (topic.endsWith('/catalog')) handleIncomingCatalogSync(data);
-            if (topic.endsWith('/catalog_chunk')) handleIncomingCatalogChunk(data);
+            mqttClient.subscribe(stateTopic);
+            mqttClient.subscribe(catalogTopic);
+            mqttClient.subscribe(chunkTopic);
+            const statEl = document.getElementById('remote-conn-status');
+            if (statEl) statEl.textContent = 'Connected to Quant TV';
+            const statDot = document.getElementById('remote-status-dot');
+            if (statDot) {
+              statDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse';
+            }
+            mqttClient.publish(presenceTopic, JSON.stringify({ event: 'connected', sender: 'remote', roomId: state.roomId, time: Date.now() }));
+            sendRemoteCmd('REMOTE_JOINED');
+            sendRemoteCmd('REQUEST_SYNC');
           } else {
-            if (topic.endsWith('/presence')) {
-              dismissRemoteModalOnConnect();
-              broadcastTVState();
-              broadcastTVCatalog();
-            } else if (topic.endsWith('/cmd')) {
-              handleIncomingRemoteCommand(data);
+            mqttClient.subscribe(cmdTopic);
+            mqttClient.subscribe(presenceTopic);
+            broadcastTVState();
+            broadcastTVCatalog();
+          }
+        });
+
+        mqttClient.on('close', () => {
+          if (state.isRemoteClient) {
+            const statEl = document.getElementById('remote-conn-status');
+            if (statEl) statEl.textContent = 'Reconnecting...';
+            const statDot = document.getElementById('remote-status-dot');
+            if (statDot) {
+              statDot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping';
             }
           }
-        } catch (e) {}
-      });
+        });
+
+        mqttClient.on('message', (topic: string, payload: any) => {
+          try {
+            const data = JSON.parse(payload.toString());
+            if (state.isRemoteClient) {
+              if (topic.endsWith('/state')) updateRemoteStateView(data);
+              if (topic.endsWith('/catalog')) handleIncomingCatalogSync(data);
+              if (topic.endsWith('/catalog_chunk')) handleIncomingCatalogChunk(data);
+            } else {
+              if (topic.endsWith('/presence')) {
+                dismissRemoteModalOnConnect();
+                broadcastTVState();
+                broadcastTVCatalog();
+              } else if (topic.endsWith('/cmd')) {
+                handleIncomingRemoteCommand(data);
+              }
+            }
+          } catch (e) {}
+        });
+      } else if (retries < 30) {
+        setTimeout(() => connectMqtt(retries + 1), 200);
+      }
+    } catch (e) {
+      if (retries < 30) {
+        setTimeout(() => connectMqtt(retries + 1), 300);
+      }
     }
-  } catch (e) {}
+  }
+
+  connectMqtt();
 }
 
 export function sendRemoteCmd(action: string, payload: Record<string, any> = {}): void {
-  if (navigator.vibrate) {
+  if (!['REMOTE_JOINED', 'REQUEST_SYNC'].includes(action) && navigator.vibrate) {
     try {
       navigator.vibrate(35);
     } catch (e) {}
@@ -107,8 +134,14 @@ export function sendRemoteCmd(action: string, payload: Record<string, any> = {})
   const cmd = { msgId, action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
 
   if (broadcastChan) broadcastChan.postMessage(cmd);
-  if (mqttClient && mqttClient.connected) {
-    mqttClient.publish(`quantum_tv/${state.roomId}/cmd`, JSON.stringify(cmd));
+  if (mqttClient) {
+    if (mqttClient.connected) {
+      mqttClient.publish(`quantum_tv/${state.roomId}/cmd`, JSON.stringify(cmd));
+    } else {
+      mqttClient.once('connect', () => {
+        mqttClient.publish(`quantum_tv/${state.roomId}/cmd`, JSON.stringify(cmd));
+      });
+    }
   }
 }
 
@@ -680,7 +713,14 @@ export function openRemotePairingModal(): void {
 export function checkAndLaunchRemoteView(): void {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.has('remote')) {
-    state.isRemoteClient = true;
+    // Dismiss boot splash immediately for mobile remote client
+    const splash = document.getElementById('app-boot-splash');
+    if (splash) {
+      splash.classList.add('hidden', 'dismissed');
+      splash.style.display = 'none';
+      splash.style.opacity = '0';
+      splash.style.pointerEvents = 'none';
+    }
 
     const video = document.getElementById('video-player') as HTMLVideoElement | null;
     if (video) {
@@ -699,7 +739,11 @@ export function checkAndLaunchRemoteView(): void {
     if (sidebar) sidebar.style.display = 'none';
 
     const remoteApp = document.getElementById('mobile-remote-app');
-    if (remoteApp) remoteApp.classList.remove('hidden');
+    if (remoteApp) {
+      remoteApp.classList.remove('hidden');
+      remoteApp.style.display = 'flex';
+      remoteApp.style.zIndex = '10000000';
+    }
 
     const roomTag = document.getElementById('remote-room-tag');
     if (roomTag) roomTag.textContent = state.roomId;

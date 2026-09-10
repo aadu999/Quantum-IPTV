@@ -777,6 +777,9 @@ export function initApp(): void {
   }).catch(() => {});
 
   checkAndLaunchRemoteView();
+  if (state.isRemoteClient) {
+    dismissBootSplash();
+  }
   setupEventListeners();
   initRemoteSync();
   setupRemoteSeekControls();
