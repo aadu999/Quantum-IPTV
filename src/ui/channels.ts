@@ -31,19 +31,22 @@ export function playChannel(index: number, options: { directPlay?: boolean } = {
     Boolean(channel.vodId) ||
     (Boolean(channel.url) && channel.url.includes('/movie/'));
 
-  // Selecting any series or movie must ALWAYS display its info dialogue box
-  if (isSeries) {
-    (window as any).openSeriesExplorer?.(channel);
-    renderChannelList();
-    renderQuickChannelStrip();
-    return;
-  }
+  // Selecting series or movie on TV list displays its info dialogue box,
+  // UNLESS directPlay is requested (e.g. from Remote or when clicking Play on an episode/movie)
+  if (!options?.directPlay) {
+    if (isSeries) {
+      (window as any).openSeriesExplorer?.(channel);
+      renderChannelList();
+      renderQuickChannelStrip();
+      return;
+    }
 
-  if (isVod) {
-    (window as any).openMovieExplorer?.(channel);
-    renderChannelList();
-    renderQuickChannelStrip();
-    return;
+    if (isVod) {
+      (window as any).openMovieExplorer?.(channel);
+      renderChannelList();
+      renderQuickChannelStrip();
+      return;
+    }
   }
 
   (window as any).closeModals?.();
@@ -550,9 +553,10 @@ export function renderRemoteChannelsList(): void {
           } active:scale-125 transition">
             <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
           </button>
-          <div class="w-7 h-7 rounded-lg ${isPlayingOnTv ? 'bg-brand-500 text-white' : 'bg-brand-600/20 text-brand-400'} flex items-center justify-center">
-            <i class="fa-solid ${iconClass} text-[10px]"></i>
-          </div>
+          <button onclick="event.stopPropagation(); sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}', type: '${ch.type || 'live'}' })" 
+                  class="w-7 h-7 rounded-lg ${isPlayingOnTv ? 'bg-brand-500 text-white' : 'bg-brand-600/20 text-brand-400 hover:bg-brand-600 hover:text-white'} flex items-center justify-center active:scale-90 hover:scale-105 transition shadow-sm" title="Play on Quant TV">
+            <i class="fa-solid fa-play text-[10px]"></i>
+          </button>
         </div>
       </div>
     `;

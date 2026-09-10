@@ -274,6 +274,36 @@ export function broadcastTVCatalog(): void {
         }, 650 + i * 60);
       }
     }
+
+    // 4. Transmit sample live channels in compact chunks over MQTT
+    if (live.length > 0) {
+      const liveChunkSize = 80;
+      const totalLiveChunks = Math.min(10, Math.ceil(live.length / liveChunkSize));
+      for (let i = 0; i < totalLiveChunks; i++) {
+        const chunkItems = live.slice(i * liveChunkSize, (i + 1) * liveChunkSize).map(l => ({
+          id: l.id,
+          name: l.name,
+          logo: l.logo || l.cover,
+          cover: l.cover || l.logo,
+          group: l.group || 'Live TV',
+          country: l.country,
+          language: l.language,
+          type: 'live',
+          url: l.url
+        }));
+        const chunkPayload = {
+          type: 'live',
+          chunkIndex: i,
+          totalChunks: totalLiveChunks,
+          items: chunkItems
+        };
+        setTimeout(() => {
+          if (mqttClient && mqttClient.connected) {
+            mqttClient.publish(`quantum_tv/${state.roomId}/catalog_chunk`, JSON.stringify(chunkPayload));
+          }
+        }, 1100 + i * 60);
+      }
+    }
   }
 }
 
@@ -285,6 +315,15 @@ export async function handleIncomingCatalogSync(payload: any): Promise<void> {
       state.lastXtreamHost = payload.session.xtreamHost;
       state.lastXtreamUser = payload.session.xtreamUser;
       state.lastXtreamPass = payload.session.xtreamPass;
+      if (state.isRemoteClient && state.channels.length <= 15 && xtreamConnector) {
+        xtreamConnector
+          .fetchXtreamPlaylist(payload.session.xtreamHost, payload.session.xtreamUser, payload.session.xtreamPass)
+          .then(() => {
+            (window as any).renderRemoteChannelsList?.();
+            QuantumSessionStore.saveChannels(state.channels);
+          })
+          .catch(() => {});
+      }
     }
     QuantumSessionStore.saveSession(payload.session);
   }
