@@ -529,6 +529,23 @@ export function setRemoteCategory(cat: string): void {
   (window as any).renderRemoteChannelsList?.();
 }
 
+export function getPublicRemoteUrl(): string {
+  let baseUrl = window.location.origin;
+  const isLocal =
+    !baseUrl ||
+    baseUrl.includes('localhost') ||
+    baseUrl.includes('127.0.0.1') ||
+    baseUrl.includes('10.0.2.2') ||
+    window.location.protocol === 'capacitor:' ||
+    (window as any).Capacitor?.isNativePlatform?.() ||
+    (window as any).Capacitor?.getPlatform?.() === 'android';
+
+  if (isLocal) {
+    baseUrl = 'https://quantum-iptv.vercel.app';
+  }
+  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}`;
+}
+
 export function openRemotePairingModal(): void {
   const modal = document.getElementById('modal-remote');
   if (!modal) return;
@@ -537,9 +554,12 @@ export function openRemotePairingModal(): void {
   const roomLabel = document.getElementById('remote-room-id');
   if (roomLabel) roomLabel.textContent = state.roomId;
 
-  const remoteUrl = `${window.location.origin}${window.location.pathname}?remote=${state.roomId}`;
+  const remoteUrl = getPublicRemoteUrl();
   const testBtn = document.getElementById('btn-test-remote') as HTMLAnchorElement | null;
   if (testBtn) testBtn.href = remoteUrl;
+
+  const urlDisplay = document.getElementById('remote-url-display');
+  if (urlDisplay) urlDisplay.textContent = remoteUrl;
 
   const qrContainer = document.getElementById('qrcode-container');
   if (qrContainer) {

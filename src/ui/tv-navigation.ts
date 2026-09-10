@@ -71,7 +71,9 @@ export function initTvNavigation(): void {
 
 function registerGlobalTvHandlers(): void {
   (window as any).handleAndroidTvBack = handleAndroidTvBack;
+  (window as any).playNextChannel = playNextChannel;
   (window as any).playPreviousChannel = playPreviousChannel;
+  (window as any).toggleMute = (window as any).toggleMute;
   (window as any).toggleTvGuide = toggleTvGuide;
   (window as any).handleTvDigitKey = handleTvDigitKey;
   (window as any).handleTvColorButton = handleTvColorButton;
@@ -104,10 +106,60 @@ export function handleAndroidTvBack(): boolean {
   return false;
 }
 
+let channelSwitchHudTimer: any = null;
+export function showTvChannelSwitchHud(channelName: string, channelIndex: number): void {
+  let hud = document.getElementById('tv-channel-switch-hud');
+  if (!hud) {
+    hud = document.createElement('div');
+    hud.id = 'tv-channel-switch-hud';
+    hud.className =
+      'fixed top-6 left-6 z-[999999] bg-slate-900/95 border-2 border-indigo-500 rounded-2xl px-5 py-3 shadow-2xl backdrop-blur-md flex items-center gap-3 transition-all duration-200 pointer-events-none opacity-0 translate-y-[-10px] scale-95';
+    hud.innerHTML = `
+      <div class="w-10 h-10 rounded-xl bg-indigo-600/30 border border-indigo-500/50 flex items-center justify-center text-indigo-400 text-lg">
+        <i class="fa-solid fa-satellite-dish"></i>
+      </div>
+      <div class="flex flex-col">
+        <span id="tv-switch-hud-num" class="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">CH 1</span>
+        <span id="tv-switch-hud-name" class="text-base font-bold text-white max-w-xs truncate">Channel Name</span>
+      </div>
+    `;
+    document.body.appendChild(hud);
+  }
+  const numEl = document.getElementById('tv-switch-hud-num');
+  const nameEl = document.getElementById('tv-switch-hud-name');
+  if (numEl) numEl.textContent = `CH ${channelIndex + 1} of ${state.filteredChannels.length}`;
+  if (nameEl) nameEl.textContent = channelName;
+
+  hud.classList.remove('opacity-0', 'translate-y-[-10px]', 'scale-95');
+  hud.classList.add('opacity-100', 'translate-y-0', 'scale-100');
+
+  if (channelSwitchHudTimer) clearTimeout(channelSwitchHudTimer);
+  channelSwitchHudTimer = setTimeout(() => {
+    if (hud) {
+      hud.classList.remove('opacity-100', 'translate-y-0', 'scale-100');
+      hud.classList.add('opacity-0', 'translate-y-[-10px]', 'scale-95');
+    }
+  }, 2200);
+}
+
+export function playNextChannel(): void {
+  if (state.filteredChannels.length === 0) return;
+  const nextIndex = (state.currentChannelIndex + 1) % state.filteredChannels.length;
+  const ch = state.filteredChannels[nextIndex];
+  if (ch) {
+    showTvChannelSwitchHud(ch.name, nextIndex);
+  }
+  (window as any).playChannel?.(nextIndex, { directPlay: true });
+}
+
 export function playPreviousChannel(): void {
   if (state.filteredChannels.length === 0) return;
   const prevIndex = (state.currentChannelIndex - 1 + state.filteredChannels.length) % state.filteredChannels.length;
-  (window as any).playChannel?.(prevIndex);
+  const ch = state.filteredChannels[prevIndex];
+  if (ch) {
+    showTvChannelSwitchHud(ch.name, prevIndex);
+  }
+  (window as any).playChannel?.(prevIndex, { directPlay: true });
 }
 
 export function toggleTvGuide(): void {
@@ -523,26 +575,65 @@ function handleTvKeyDown(e: KeyboardEvent): void {
       (window as any).toggleFullscreenMode?.();
       break;
 
-    // Direct Quant Remote toggle shortcuts (Key R or Key M or Menu)
+    // Direct Quant Remote toggle shortcuts (Key R)
     case 'KeyR':
     case 'r':
     case 'R':
-    case 'KeyM':
-    case 'm':
-    case 'M':
       if (!(e.target instanceof HTMLInputElement)) {
         e.preventDefault();
         (window as any).openRemoteModal?.();
       }
       break;
 
-    // Channel Up / Down hardware keys
-    case 'ChannelUp':
+    // Mute hardware & shortcut keys (Key M or VolumeMute)
+    case 'KeyM':
+    case 'm':
+    case 'M':
+    case 'VolumeMute':
+    case 'AudioVolumeMute':
+      if (!(e.target instanceof HTMLInputElement)) {
+        e.preventDefault();
+        (window as any).toggleMute?.();
+      }
+      break;
+
+    // Volume hardware keys
+    case 'VolumeUp':
+    case 'AudioVolumeUp':
       e.preventDefault();
-      (window as any).playNextWorkingChannel?.();
+      {
+        const video = document.getElementById('video-player') as HTMLVideoElement | null;
+        if (video) {
+          video.volume = Math.min(1, Math.round((video.volume + 0.05) * 100) / 100);
+          video.muted = false;
+          (window as any).showTvVolumeHud?.(video.volume, false);
+          (window as any).broadcastTVState?.();
+        }
+      }
+      break;
+
+    case 'VolumeDown':
+    case 'AudioVolumeDown':
+      e.preventDefault();
+      {
+        const video = document.getElementById('video-player') as HTMLVideoElement | null;
+        if (video) {
+          video.volume = Math.max(0, Math.round((video.volume - 0.05) * 100) / 100);
+          (window as any).showTvVolumeHud?.(video.volume, video.muted);
+          (window as any).broadcastTVState?.();
+        }
+      }
+      break;
+
+    // Channel Up / Down & Program + / - hardware keys
+    case 'ChannelUp':
+    case 'PageUp':
+      e.preventDefault();
+      playNextChannel();
       break;
 
     case 'ChannelDown':
+    case 'PageDown':
       e.preventDefault();
       playPreviousChannel();
       break;

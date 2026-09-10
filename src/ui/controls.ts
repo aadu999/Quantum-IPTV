@@ -218,6 +218,26 @@ export function unmuteAudioNow(): void {
   broadcastTVState();
 }
 
+export function toggleMute(): void {
+  const video = document.getElementById('video-player') as HTMLVideoElement | null;
+  const btnMute = document.getElementById('btn-mute');
+  const unmuteBanner = document.getElementById('unmute-banner');
+
+  if (!video) return;
+
+  video.muted = !video.muted;
+  if (btnMute) {
+    btnMute.innerHTML = video.muted
+      ? '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>'
+      : '<i class="fa-solid fa-volume-high text-xs"></i>';
+  }
+  if (!video.muted && unmuteBanner) {
+    unmuteBanner.classList.add('hidden');
+  }
+  showTvVolumeHud(video.volume, video.muted);
+  broadcastTVState();
+}
+
 export function seekVideo(secondsDelta: number): void {
   if (!engineInstance || !engineInstance.video) return;
   const video = engineInstance.video;
@@ -343,6 +363,7 @@ export function adjustMobileVideoStage(): void {
 (window as any).handleSeekBarClick = handleSeekBarClick;
 (window as any).playNextWorkingChannel = playNextWorkingChannel;
 (window as any).showTvVolumeHud = showTvVolumeHud;
+(window as any).toggleMute = toggleMute;
 (window as any).adjustMobileVideoStage = adjustMobileVideoStage;
 (window as any).showEngineHud = showEngineHud;
 

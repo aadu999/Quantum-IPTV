@@ -16,7 +16,8 @@ import {
   checkAndLaunchRemoteView,
   setupRemoteModal,
   sendRemoteCmd,
-  setupRemoteSeekControls
+  setupRemoteSeekControls,
+  getPublicRemoteUrl
 } from './services/remote';
 import {
   setEngineInstance,
@@ -24,6 +25,7 @@ import {
   toggleFullscreenMode,
   wakeControls,
   unmuteAudioNow,
+  toggleMute,
   seekVideo,
   handleSeekBarClick,
   playNextWorkingChannel,
@@ -438,15 +440,7 @@ export function setupEventListeners(): void {
 
   if (btnMute) {
     btnMute.addEventListener('click', () => {
-      if (video) {
-        video.muted = !video.muted;
-        btnMute.innerHTML = video.muted
-          ? '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>'
-          : '<i class="fa-solid fa-volume-high text-xs"></i>';
-        if (unmuteBanner && !video.muted) unmuteBanner.classList.add('hidden');
-        showTvVolumeHud(video.volume, video.muted);
-        broadcastTVState();
-      }
+      toggleMute();
     });
   }
 
@@ -599,7 +593,7 @@ export function setupEventListeners(): void {
 
   if (btnCopyRemote) {
     btnCopyRemote.addEventListener('click', () => {
-      const remoteUrl = `${window.location.origin}${window.location.pathname}?remote=${state.roomId}`;
+      const remoteUrl = getPublicRemoteUrl();
       copyToClipboard(remoteUrl);
       btnCopyRemote.textContent = 'Copied!';
       setTimeout(() => {
@@ -654,11 +648,7 @@ export function setupEventListeners(): void {
         toggleFullscreenMode();
         break;
       case 'KeyM':
-        if (video) {
-          video.muted = !video.muted;
-          showTvVolumeHud(video.volume, video.muted);
-          broadcastTVState();
-        }
+        toggleMute();
         break;
       case 'ArrowUp':
         e.preventDefault();

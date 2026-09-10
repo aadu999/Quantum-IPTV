@@ -1,5 +1,7 @@
 package com.quantum.iptv;
 
+import android.content.Context;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
@@ -122,11 +124,30 @@ public class MainActivity extends BridgeActivity {
                         return true;
 
                     case KeyEvent.KEYCODE_CHANNEL_UP:
-                        webView.evaluateJavascript("window.playNextWorkingChannel && window.playNextWorkingChannel();", null);
+                    case KeyEvent.KEYCODE_PAGE_UP:
+                    case KeyEvent.KEYCODE_MEDIA_NEXT:
+                    case 272: // KEYCODE_TV_CHANNEL_UP
+                    case 274:
+                        webView.evaluateJavascript("window.playNextChannel ? window.playNextChannel() : (window.playNextWorkingChannel && window.playNextWorkingChannel());", null);
                         return true;
 
                     case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                    case KeyEvent.KEYCODE_PAGE_DOWN:
+                    case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                    case 273: // KEYCODE_TV_CHANNEL_DOWN
+                    case 275:
                         webView.evaluateJavascript("window.playPreviousChannel && window.playPreviousChannel();", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_VOLUME_MUTE:
+                    case KeyEvent.KEYCODE_MUTE:
+                        try {
+                            AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                            if (audioManager != null) {
+                                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI);
+                            }
+                        } catch (Exception ignored) {}
+                        webView.evaluateJavascript("window.toggleMute && window.toggleMute();", null);
                         return true;
 
                     case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
