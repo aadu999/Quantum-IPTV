@@ -53,6 +53,7 @@ export function initRemoteSync(): void {
           connectTimeout: 8000,
           reconnectPeriod: 2000
         });
+        (window as any).mqttClient = mqttClient;
 
         mqttClient.on('connect', () => {
           const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
