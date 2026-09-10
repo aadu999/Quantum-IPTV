@@ -1,3 +1,4 @@
+import './index.css';
 import { state, DEFAULT_PRESET_CHANNELS } from './state/store';
 import { QuantumSessionStore } from './state/session';
 import { userProfile, decisionEngine } from './state/user-profile';
@@ -40,13 +41,15 @@ import {
   playChannel,
   tuneToChannel,
   filterChannels,
+  filterContentType,
   renderChannelList,
   updateFavoritesUI,
   loadMoreTvChannels,
   renderRemoteChannelsList,
   renderRemoteFavsList,
   clearRemoteSearch,
-  loadMoreRemoteChannels
+  loadMoreRemoteChannels,
+  updateLanguageDropdown
 } from './ui/channels';
 import {
   setModalEngineInstance,
@@ -115,6 +118,18 @@ export function closeRemoteModal(): void {
   const modal = document.getElementById('modal-remote');
   if (modal) modal.classList.add('hidden');
 }
+
+export function dismissBootSplash(): void {
+  const splash = document.getElementById('app-boot-splash');
+  if (!splash || splash.classList.contains('dismissed')) return;
+  splash.classList.add('dismissed');
+  splash.style.opacity = '0';
+  splash.style.pointerEvents = 'none';
+  setTimeout(() => {
+    splash.classList.add('hidden');
+  }, 750);
+}
+(window as any).dismissBootSplash = dismissBootSplash;
 
 export function setM3uUrl(url: string): void {
   const input = document.getElementById('input-m3u-url') as HTMLInputElement | null;
@@ -219,6 +234,25 @@ export async function connectXtreamApi(overrideHost?: string, overrideUser?: str
     engine.showToast(`Xtream API Error: ${e.message}`, 'error');
   }
 }
+
+export function purgeXtreamLiveChannels(): number {
+  const initial = state.channels.length;
+  state.channels = state.channels.filter(ch => !ch.id.startsWith('xt_live_') && ch.group !== 'Xtream Live');
+  const removed = initial - state.channels.length;
+  updateLanguageDropdown();
+  filterChannels();
+  QuantumSessionStore.saveChannels(state.channels);
+  broadcastTVState();
+  broadcastTVCatalog();
+  engine.showToast(
+    removed > 0
+      ? `Blocked & removed ${removed.toLocaleString()} Xtream live channels. M3U channels preserved!`
+      : 'No Xtream live channels in the current playlist.',
+    'info'
+  );
+  return removed;
+}
+(window as any).purgeXtreamLiveChannels = purgeXtreamLiveChannels;
 
 export async function connectStalkerPortal(): Promise<void> {
   const portal = (document.getElementById('input-stalker-url') as HTMLInputElement | null)?.value.trim();
@@ -650,47 +684,13 @@ export function setupEventListeners(): void {
       case 'KeyM':
         toggleMute();
         break;
-      case 'ArrowUp':
-        e.preventDefault();
-        if (video) {
-          video.volume = Math.min(1, Math.round((video.volume + 0.05) * 100) / 100);
-          if (volSlider) volSlider.value = String(video.volume);
-          showTvVolumeHud(video.volume, video.muted);
-          broadcastTVState();
-        }
-        break;
-      case 'ArrowDown':
-        e.preventDefault();
-        if (video) {
-          video.volume = Math.max(0, Math.round((video.volume - 0.05) * 100) / 100);
-          if (volSlider) volSlider.value = String(video.volume);
-          showTvVolumeHud(video.volume, video.muted);
-          broadcastTVState();
-        }
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        if (hasFiniteDuration) {
-          seekVideo(10);
-        } else if (state.currentChannelIndex < state.filteredChannels.length - 1) {
-          playChannel(state.currentChannelIndex + 1);
-        }
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        if (hasFiniteDuration) {
-          seekVideo(-10);
-        } else if (state.currentChannelIndex > 0) {
-          playChannel(state.currentChannelIndex - 1);
-        }
-        break;
       case 'KeyL':
       case 'MediaFastForward':
-        seekVideo(10);
+        seekVideo(10, true);
         break;
       case 'KeyJ':
       case 'MediaRewind':
-        seekVideo(-10);
+        seekVideo(-10, true);
         break;
       case 'KeyN':
       case 'MediaTrackNext':
@@ -703,6 +703,7 @@ export function setupEventListeners(): void {
         if (state.currentChannelIndex > 0) {
           playChannel(state.currentChannelIndex - 1);
         }
+        break;
     }
   });
 
@@ -758,6 +759,23 @@ export function initApp(): void {
   });
   state.filteredChannels = [...state.channels];
 
+  // Asynchronously hydrate complete catalog from IndexedDB (offline-first)
+  QuantumOfflineCache.loadAllChannels().then(idbChannels => {
+    if (idbChannels && idbChannels.length > 0) {
+      let added = 0;
+      idbChannels.forEach(c => {
+        if (!state.channels.some(existing => existing.id === c.id || (existing.url && existing.url === c.url))) {
+          state.channels.push(sanitizeChannel(c));
+          added++;
+        }
+      });
+      if (added > 0) {
+        updateLanguageDropdown();
+        filterChannels();
+      }
+    }
+  }).catch(() => {});
+
   checkAndLaunchRemoteView();
   setupEventListeners();
   initRemoteSync();
@@ -765,24 +783,55 @@ export function initApp(): void {
 
   if (!state.isRemoteClient) {
     engine.initHls();
-    renderChannelList();
+
+    // 1. Configure Malayalam Language & Live TV category by default on startup
+    const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;
+    const labelLanguageFilter = document.getElementById('label-language-filter');
+    if (languageFilter) {
+      languageFilter.value = 'Malayalam';
+    }
+    if (labelLanguageFilter) {
+      labelLanguageFilter.textContent = 'Malayalam';
+    }
+
+    // Set Live TV category and apply filter
+    filterContentType('live');
+    updateLanguageDropdown();
+    filterChannels();
+
     updateFavoritesUI();
     adjustMobileVideoStage();
 
-    // 3. Resume last played channel index if saved
+    // 2. Play initial Malayalam Live TV channel
     let initialIndex = 0;
-    if (
-      savedSession &&
-      typeof savedSession.lastChannelIndex === 'number' &&
-      savedSession.lastChannelIndex >= 0 &&
-      savedSession.lastChannelIndex < state.filteredChannels.length
-    ) {
-      initialIndex = savedSession.lastChannelIndex;
-    } else {
-      const firstLive = state.filteredChannels.findIndex(c => c.type !== 'series' && c.type !== 'vod');
-      if (firstLive !== -1) initialIndex = firstLive;
+    const firstMalLive = state.filteredChannels.findIndex(c =>
+      (c.type !== 'series' && c.type !== 'vod') &&
+      ((c.language && c.language.toLowerCase() === 'malayalam') ||
+       (c.name && c.name.toLowerCase().includes('malayalam')) ||
+       (c.name && c.name.toLowerCase().includes('asianet')))
+    );
+    if (firstMalLive !== -1) {
+      initialIndex = firstMalLive;
+    } else if (state.filteredChannels.length > 0) {
+      initialIndex = 0;
     }
     playChannel(initialIndex, { directPlay: true });
+
+    // 3. Immediately launch in Fullscreen Mode
+    toggleFullscreenMode(true);
+    setTimeout(() => {
+      if (!state.isRemoteClient) {
+        toggleFullscreenMode(true);
+      }
+    }, 400);
+
+    // 4. Smoothly dismiss boot splash once video starts or after graceful intro window
+    videoElement.addEventListener('playing', () => {
+      dismissBootSplash();
+    }, { once: true });
+    setTimeout(() => {
+      dismissBootSplash();
+    }, 1400);
 
     // 4. Background re-sync for active provider session or public live channels
     const liveCount = state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId).length;

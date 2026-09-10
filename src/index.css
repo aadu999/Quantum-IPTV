@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Critical TV & Shell Layout Styles */
+html, body {
+  touch-action: manipulation !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  overscroll-behavior: none !important;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #020617;
+  color: #f8fafc;
+  overflow: hidden;
+}
+
+button, input, select, a, .touch-target {
+  touch-action: manipulation !important;
+  -webkit-tap-highlight-color: transparent !important;
+  user-select: none !important;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.8);
+}
+
+/* CSS Theater Fullscreen Mode */
+.theater-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 45 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #000 !important;
+}
+
+/* TV Focused Seek Bar */
+#seek-bar-container.tv-focused,
+#seek-bar-container.tv-focused-btn,
+#seek-bar-container:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.9), 0 0 20px rgba(99, 102, 241, 0.5) !important;
+  border-radius: 9999px !important;
+  transform: scaleY(1.35) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+#seek-bar-container.tv-focused #seek-handle,
+#seek-bar-container.tv-focused-btn #seek-handle,
+#seek-bar-container:focus #seek-handle {
+  transform: scale(1.6) !important;
+  box-shadow: 0 0 14px rgba(99, 102, 241, 1), 0 0 24px rgba(255, 255, 255, 0.9) !important;
+  border-color: #ffffff !important;
+}
+
+/* TV D-Pad High-Visibility Golden Halo */
+.tv-focused {
+  outline: 3px solid #6366f1 !important;
+  outline-offset: 1px !important;
+  background-color: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.6) !important;
+  transform: scale(1.015);
+  transition: transform 0.12s ease-out, background-color 0.12s ease-out;
+  z-index: 25 !important;
+}
+
+.tv-focused-btn {
+  outline: 3px solid #6366f1 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 18px rgba(99, 102, 241, 0.75) !important;
+  background-color: rgba(99, 102, 241, 0.4) !important;
+  transform: scale(1.05);
+  transition: transform 0.12s ease-out;
+  z-index: 30 !important;
+}
+
+.tv-focused-fav {
+  outline: 3px solid #f59e0b !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.85) !important;
+  background-color: rgba(245, 158, 11, 0.35) !important;
+  transform: scale(1.2) !important;
+  transition: transform 0.12s ease-out !important;
+  z-index: 35 !important;
+}

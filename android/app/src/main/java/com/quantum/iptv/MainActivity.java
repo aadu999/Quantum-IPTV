@@ -67,11 +67,81 @@ public class MainActivity extends BridgeActivity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void unmute() {
+            runOnUiThread(() -> {
+                try {
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am != null) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0);
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_SAME, AudioManager.FLAG_SHOW_UI);
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+
+        @JavascriptInterface
+        public void mute() {
+            runOnUiThread(() -> {
+                try {
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am != null) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI);
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+
+        @JavascriptInterface
+        public void toggleMute() {
+            runOnUiThread(() -> {
+                try {
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am != null) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI);
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+    }
+
+    private void applyImmersiveFullscreen() {
+        runOnUiThread(() -> {
+            try {
+                getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                );
+            } catch (Exception ignored) {}
+        });
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        applyImmersiveFullscreen();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            applyImmersiveFullscreen();
+        }
     }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        applyImmersiveFullscreen();
+
+        // Direct hardware volume keys on TV remote to multimedia audio stream
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
         httpClient = new OkHttpClient.Builder()
                 .followRedirects(true)
@@ -108,103 +178,157 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            int keyCode = event.getKeyCode();
-            WebView webView = this.getBridge().getWebView();
+        int action = event.getAction();
+        int keyCode = event.getKeyCode();
+        WebView webView = this.getBridge().getWebView();
 
-            if (webView != null) {
-                switch (keyCode) {
-                    case KeyEvent.KEYCODE_BACK:
-                        // Forward BACK to JS handler (closes modals, exits fullscreen, or handles double-tap exit)
-                        webView.evaluateJavascript("window.handleAndroidTvBack ? window.handleAndroidTvBack() : false;", value -> {
-                            if (!"true".equals(value)) {
-                                runOnUiThread(this::handleNativeBackExit);
+        if (webView != null) {
+            // Handle dedicated Volume, Mute, Channel, and Media keys on TV remotes
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_VOLUME_UP:
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        try {
+                            AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                            if (audioManager != null) {
+                                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI);
                             }
-                        });
-                        return true;
+                        } catch (Exception ignored) {}
+                        webView.evaluateJavascript("window.handleNativeVolumeUp && window.handleNativeVolumeUp();", null);
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_CHANNEL_UP:
-                    case KeyEvent.KEYCODE_PAGE_UP:
-                    case KeyEvent.KEYCODE_MEDIA_NEXT:
-                    case 272: // KEYCODE_TV_CHANNEL_UP
-                    case 274:
-                        webView.evaluateJavascript("window.playNextChannel ? window.playNextChannel() : (window.playNextWorkingChannel && window.playNextWorkingChannel());", null);
-                        return true;
+                case KeyEvent.KEYCODE_VOLUME_DOWN:
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        try {
+                            AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                            if (audioManager != null) {
+                                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI);
+                            }
+                        } catch (Exception ignored) {}
+                        webView.evaluateJavascript("window.handleNativeVolumeDown && window.handleNativeVolumeDown();", null);
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_CHANNEL_DOWN:
-                    case KeyEvent.KEYCODE_PAGE_DOWN:
-                    case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
-                    case 273: // KEYCODE_TV_CHANNEL_DOWN
-                    case 275:
-                        webView.evaluateJavascript("window.playPreviousChannel && window.playPreviousChannel();", null);
-                        return true;
-
-                    case KeyEvent.KEYCODE_VOLUME_MUTE:
-                    case KeyEvent.KEYCODE_MUTE:
+                case KeyEvent.KEYCODE_VOLUME_MUTE:
+                case KeyEvent.KEYCODE_MUTE:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         try {
                             AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
                             if (audioManager != null) {
                                 audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI);
                             }
                         } catch (Exception ignored) {}
-                        webView.evaluateJavascript("window.toggleMute && window.toggleMute();", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                    case KeyEvent.KEYCODE_MEDIA_PLAY:
-                    case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                case KeyEvent.KEYCODE_CHANNEL_UP:
+                case KeyEvent.KEYCODE_PAGE_UP:
+                case KeyEvent.KEYCODE_MEDIA_NEXT:
+                case 260: // KEYCODE_TV_PROGRAM_UP (common on European / Thomson / Skyworth DVB platforms)
+                case 272: // KEYCODE_TV_CHANNEL_UP
+                case 274: // KEYCODE_MEDIA_STEP_FORWARD
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        webView.evaluateJavascript("window.playNextChannel ? window.playNextChannel() : (window.playNextWorkingChannel && window.playNextWorkingChannel());", null);
+                    }
+                    return true;
+
+                case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                case KeyEvent.KEYCODE_PAGE_DOWN:
+                case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                case 261: // KEYCODE_TV_PROGRAM_DOWN (common on European / Thomson / Skyworth DVB platforms)
+                case 273: // KEYCODE_TV_CHANNEL_DOWN
+                case 275: // KEYCODE_MEDIA_STEP_BACKWARD
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        webView.evaluateJavascript("window.playPreviousChannel && window.playPreviousChannel();", null);
+                    }
+                    return true;
+
+                case KeyEvent.KEYCODE_BACK:
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        webView.evaluateJavascript("window.handleAndroidTvBack ? window.handleAndroidTvBack() : false;", value -> {
+                            if (!"true".equals(value)) {
+                                runOnUiThread(this::handleNativeBackExit);
+                            }
+                        });
+                    }
+                    return true;
+
+                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                case KeyEvent.KEYCODE_MEDIA_PLAY:
+                case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         webView.evaluateJavascript("window.togglePlayPause && window.togglePlayPause();", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
-                        webView.evaluateJavascript("window.seekVideo && window.seekVideo(10);", null);
-                        return true;
+                case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        webView.evaluateJavascript("window.seekVideo && window.seekVideo(10, true);", null);
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_MEDIA_REWIND:
-                        webView.evaluateJavascript("window.seekVideo && window.seekVideo(-10);", null);
-                        return true;
+                case KeyEvent.KEYCODE_MEDIA_REWIND:
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        webView.evaluateJavascript("window.seekVideo && window.seekVideo(-10, true);", null);
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_MENU:
+                case KeyEvent.KEYCODE_MENU:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         // Dedicated remote MENU button: Immediately opens Quant Remote (QR code pairing modal)
                         webView.evaluateJavascript("window.openRemoteModal && window.openRemoteModal();", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_INFO:
-                    case 171: // KEYCODE_WINDOW
-                    case 178: // KEYCODE_TV_INPUT
+                case KeyEvent.KEYCODE_INFO:
+                case 171: // KEYCODE_WINDOW
+                case 178: // KEYCODE_TV_INPUT
+                    if (action == KeyEvent.ACTION_DOWN) {
                         // Dedicated remote INFO or WINDOW button: Immediately toggles Fullscreen Mode
                         webView.evaluateJavascript("window.toggleFullscreenMode && window.toggleFullscreenMode();", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_GUIDE:
+                case KeyEvent.KEYCODE_GUIDE:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         webView.evaluateJavascript("window.toggleTvGuide && window.toggleTvGuide();", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_PROG_RED:
+                case KeyEvent.KEYCODE_PROG_RED:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('red');", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_PROG_GREEN:
+                case KeyEvent.KEYCODE_PROG_GREEN:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         // Green button: Shortcut to open Quant Remote QR code!
                         webView.evaluateJavascript("window.openRemoteModal && window.openRemoteModal();", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_PROG_YELLOW:
+                case KeyEvent.KEYCODE_PROG_YELLOW:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('yellow');", null);
-                        return true;
+                    }
+                    return true;
 
-                    case KeyEvent.KEYCODE_PROG_BLUE:
+                case KeyEvent.KEYCODE_PROG_BLUE:
+                    if (action == KeyEvent.ACTION_DOWN) {
                         // Blue button: Shortcut to toggle Fullscreen Mode!
                         webView.evaluateJavascript("window.toggleFullscreenMode && window.toggleFullscreenMode();", null);
-                        return true;
-                }
+                    }
+                    return true;
+            }
 
-                // Handle direct 0-9 numeric channel dialing on TV remotes
-                if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
+            // Handle direct 0-9 numeric channel dialing on TV remotes
+            if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
+                if (action == KeyEvent.ACTION_DOWN) {
                     int digit = keyCode - KeyEvent.KEYCODE_0;
                     webView.evaluateJavascript("window.handleTvDigitKey && window.handleTvDigitKey(" + digit + ");", null);
-                    return true;
                 }
+                return true;
             }
         }
         return super.dispatchKeyEvent(event);
@@ -260,23 +384,31 @@ public class MainActivity extends BridgeActivity {
             if (urlString.contains("/api/proxy")) {
                 String targetUrl = uri.getQueryParameter("url");
                 if (targetUrl != null && !targetUrl.isEmpty()) {
-                    return executeProxyStream(targetUrl);
+                    return executeProxyStream(request, targetUrl);
                 }
             }
 
             return super.shouldInterceptRequest(view, request);
         }
 
-        private WebResourceResponse executeProxyStream(String targetUrl) {
+        private WebResourceResponse executeProxyStream(WebResourceRequest request, String targetUrl) {
             try {
-                Request req = new Request.Builder()
+                Request.Builder reqBuilder = new Request.Builder()
                         .url(targetUrl)
                         .header("User-Agent", "VLC/3.0.18 LibVLC/3.0.18")
-                        .header("Accept", "*/*")
-                        .build();
+                        .header("Accept", "*/*");
 
-                Response resp = httpClient.newCall(req).execute();
-                if (!resp.isSuccessful() || resp.body() == null) {
+                if (request != null && request.getRequestHeaders() != null) {
+                    for (Map.Entry<String, String> entry : request.getRequestHeaders().entrySet()) {
+                        String key = entry.getKey();
+                        if ("Range".equalsIgnoreCase(key) || "If-Range".equalsIgnoreCase(key)) {
+                            reqBuilder.header(key, entry.getValue());
+                        }
+                    }
+                }
+
+                Response resp = httpClient.newCall(reqBuilder.build()).execute();
+                if (!resp.isSuccessful() && resp.code() != 206) {
                     return new WebResourceResponse("text/plain", "UTF-8", 502, "Bad Gateway", createCorsHeaders(), new ByteArrayInputStream("Proxy error".getBytes(StandardCharsets.UTF_8)));
                 }
 
@@ -286,7 +418,14 @@ public class MainActivity extends BridgeActivity {
                     mimeType = contentType.contains(";") ? contentType.split(";")[0].trim() : contentType;
                 }
 
+                Map<String, String> responseHeaders = createCorsHeaders();
+                if (resp.header("Content-Range") != null) responseHeaders.put("Content-Range", resp.header("Content-Range"));
+                if (resp.header("Content-Length") != null) responseHeaders.put("Content-Length", resp.header("Content-Length"));
+                if (resp.header("Accept-Ranges") != null) responseHeaders.put("Accept-Ranges", resp.header("Accept-Ranges"));
+
                 InputStream stream = resp.body().byteStream();
+                int statusCode = resp.code();
+                String reasonPhrase = (resp.message() == null || resp.message().isEmpty()) ? "OK" : resp.message();
 
                 // If it is an M3U8 stream playlist, rewrite relative chunk links to /api/proxy
                 if (targetUrl.toLowerCase().contains(".m3u8") || mimeType.contains("mpegurl") || mimeType.contains("m3u")) {
@@ -319,7 +458,7 @@ public class MainActivity extends BridgeActivity {
                     return new WebResourceResponse("application/vnd.apple.mpegurl", "UTF-8", 200, "OK", createCorsHeaders(), new ByteArrayInputStream(bytes));
                 }
 
-                return new WebResourceResponse(mimeType, null, 200, "OK", createCorsHeaders(), stream);
+                return new WebResourceResponse(mimeType, null, statusCode, reasonPhrase, responseHeaders, stream);
             } catch (Exception e) {
                 return new WebResourceResponse("text/plain", "UTF-8", 500, "Internal Server Error", createCorsHeaders(), new ByteArrayInputStream((e.getMessage() != null ? e.getMessage() : "Error").getBytes(StandardCharsets.UTF_8)));
             }

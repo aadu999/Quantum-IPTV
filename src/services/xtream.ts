@@ -130,14 +130,29 @@ export function attachXtreamAutoParse(hostId: string, userId: string, passId: st
 }
 
 export class QuantumXtreamConnector {
-  async fetchXtreamPlaylist(hostInput?: string, userInput?: string, passInput?: string): Promise<number> {
+  async fetchXtreamPlaylist(
+    hostInput?: string,
+    userInput?: string,
+    passInput?: string,
+    options?: { blockLive?: boolean }
+  ): Promise<number> {
     const { host, username, password } = parseXtreamInput(hostInput, userInput, passInput);
 
     if (!host) {
       throw new Error('Please specify a valid Xtream Host URL.');
     }
 
+    const shouldBlockLive =
+      options?.blockLive !== undefined
+        ? options.blockLive
+        : (document.getElementById('checkbox-block-xtream-live') as HTMLInputElement | null)?.checked ?? false;
+
     let addedCount = 0;
+
+    // If blocking Xtream live feeds, purge any existing xt_live_ channels from state
+    if (shouldBlockLive) {
+      state.channels = state.channels.filter(ch => !ch.id.startsWith('xt_live_') && ch.group !== 'Xtream Live');
+    }
 
     // STRATEGY A: Query JSON Player API (player_api.php) if credentials are available
     if (username && password) {
@@ -220,38 +235,40 @@ export class QuantumXtreamConnector {
             console.warn('Xtream VOD JSON fetch warning:', e.message);
           }
 
-          // 3. Live Streams with dual HLS + TS failover sources
-          try {
-            const liveUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
-            const liveText = await fetchWithProxyFallback(liveUrl);
-            const liveStreams = JSON.parse(liveText);
-            if (Array.isArray(liveStreams)) {
-              liveStreams.forEach(item => {
-                const m3u8Url = `${host}/live/${username}/${password}/${item.stream_id}.m3u8`;
-                const tsUrl = `${host}/live/${username}/${password}/${item.stream_id}.ts`;
-                const ch: Channel = {
-                  id: 'xt_live_' + item.stream_id,
-                  name: item.name,
-                  url: m3u8Url,
-                  logo: item.stream_icon,
-                  group: item.category_name || 'Xtream Live',
-                  language: inferChannelLanguage(item.name) || undefined,
-                  type: 'live',
-                  tvgId: item.epg_channel_id,
-                  sources: [
-                    { url: m3u8Url, sourceName: 'Xtream HLS' },
-                    { url: tsUrl, sourceName: 'Xtream MPEG-TS' }
-                  ]
-                };
-                const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
-                if (!state.channels.includes(fused)) {
-                  state.channels.push(fused);
-                  addedCount++;
-                }
-              });
+          // 3. Live Streams with dual HLS + TS failover sources (Skipped if shouldBlockLive is true)
+          if (!shouldBlockLive) {
+            try {
+              const liveUrl = `${host}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
+              const liveText = await fetchWithProxyFallback(liveUrl);
+              const liveStreams = JSON.parse(liveText);
+              if (Array.isArray(liveStreams)) {
+                liveStreams.forEach(item => {
+                  const m3u8Url = `${host}/live/${username}/${password}/${item.stream_id}.m3u8`;
+                  const tsUrl = `${host}/live/${username}/${password}/${item.stream_id}.ts`;
+                  const ch: Channel = {
+                    id: 'xt_live_' + item.stream_id,
+                    name: item.name,
+                    url: m3u8Url,
+                    logo: item.stream_icon,
+                    group: item.category_name || 'Xtream Live',
+                    language: inferChannelLanguage(item.name) || undefined,
+                    type: 'live',
+                    tvgId: item.epg_channel_id,
+                    sources: [
+                      { url: m3u8Url, sourceName: 'Xtream HLS' },
+                      { url: tsUrl, sourceName: 'Xtream MPEG-TS' }
+                    ]
+                  };
+                  const fused = sourceFusionEngine.fuseChannel(ch, 'Xtream API');
+                  if (!state.channels.includes(fused)) {
+                    state.channels.push(fused);
+                    addedCount++;
+                  }
+                });
+              }
+            } catch (e: any) {
+              console.warn('Xtream Live Streams JSON fetch warning:', e.message);
             }
-          } catch (e: any) {
-            console.warn('Xtream Live Streams JSON fetch warning:', e.message);
           }
         }
       } catch (e: any) {

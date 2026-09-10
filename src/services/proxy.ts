@@ -16,10 +16,18 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
   const proxies = [
     `/api/proxy?url=${encoded}`,
     `https://corsproxy.io/?${encoded}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
     `https://api.allorigins.win/raw?url=${encoded}`
   ];
 
+  const isNative = typeof window !== 'undefined' && (
+    (window as any).Capacitor?.isNativePlatform?.() ||
+    (window as any).Capacitor?.getPlatform?.() === 'android' ||
+    window.location.protocol === 'capacitor:'
+  );
+
   if (
+    isNative ||
     targetUrl.includes('iptv-org.github.io') ||
     (typeof window !== 'undefined' && window.location.protocol === 'http:' && targetUrl.startsWith('http://'))
   ) {

@@ -38,6 +38,8 @@ export function closeModals(): void {
   if (modalRemoteSeries) modalRemoteSeries.classList.add('hidden');
   const modalAppDialog = document.getElementById('modal-app-dialog');
   if (modalAppDialog) modalAppDialog.classList.add('hidden');
+  const modalTvSelect = document.getElementById('modal-tv-select-picker');
+  if (modalTvSelect) modalTvSelect.classList.add('hidden');
 }
 
 // Global backdrop click dismissal and Escape key handling
@@ -53,7 +55,8 @@ if (typeof document !== 'undefined') {
       'modal-movie-explorer',
       'rem-modal-movie',
       'rem-modal-series',
-      'modal-app-dialog'
+      'modal-app-dialog',
+      'modal-tv-select-picker'
     ];
     if (modalIds.includes(target.id)) {
       target.classList.add('hidden');
@@ -99,6 +102,15 @@ export async function openSeriesExplorer(channel: Channel): Promise<void> {
   }
   if (grid) grid.innerHTML = '';
   modal.classList.remove('hidden');
+
+  setTimeout(() => {
+    const focusTarget = modal.querySelector('.season-tab-btn, button') as HTMLElement | null;
+    if (focusTarget) {
+      document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(n => n.classList.remove('tv-focused', 'tv-focused-btn'));
+      focusTarget.classList.add('tv-focused-btn');
+      focusTarget.focus();
+    }
+  }, 50);
 
   if (channel.seriesId && xtreamConnector) {
     const info = await xtreamConnector.fetchSeriesInfo(channel.seriesId, channel);
@@ -154,9 +166,9 @@ export function renderSeriesSeasonsAndEpisodes(info: any): void {
   const seasonsHtml = seasonNums
     .map(
       (sNum, idx) => `
-    <button onclick="window.selectSeriesSeason('${sNum}')" id="season-tab-${sNum}" class="season-tab-btn px-3.5 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 ${
+    <button onclick="window.selectSeriesSeason('${sNum}')" id="season-tab-${sNum}" class="season-tab-btn px-2.5 py-1 rounded-lg font-bold text-[11px] transition border shrink-0 ${
         idx === 0
-          ? 'bg-brand-600 border-brand-500 text-white shadow-md'
+          ? 'bg-brand-600 border-brand-500 text-white shadow-sm'
           : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
       }">
       Season ${sNum}
@@ -177,13 +189,13 @@ export function selectSeriesSeason(seasonNum: string): void {
   if (!currentSeriesInfoCache || !currentSeriesInfoCache.episodes) return;
   document.querySelectorAll('.season-tab-btn').forEach(btn => {
     btn.className =
-      'season-tab-btn px-3.5 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white';
+      'season-tab-btn px-2.5 py-1 rounded-lg font-bold text-[11px] transition border shrink-0 bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white';
   });
 
   const activeBtn = document.getElementById(`season-tab-${seasonNum}`);
   if (activeBtn) {
     activeBtn.className =
-      'season-tab-btn px-3.5 py-1.5 rounded-xl font-bold text-xs transition border shrink-0 bg-brand-600 border-brand-500 text-white shadow-md';
+      'season-tab-btn px-2.5 py-1 rounded-lg font-bold text-[11px] transition border shrink-0 bg-brand-600 border-brand-500 text-white shadow-sm';
   }
 
   const episodes = currentSeriesInfoCache.episodes[seasonNum] || [];
@@ -200,16 +212,16 @@ export function selectSeriesSeason(seasonNum: string): void {
       const epNumStr = `S${String(seasonNum).padStart(2, '0')}E${String(ep.episode_num || 1).padStart(2, '0')}`;
 
       return `
-      <div class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-2xl p-3 flex flex-col justify-between space-y-2.5 transition shadow-lg group">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <span class="text-xs font-bold text-white group-hover:text-brand-300 transition line-clamp-1">${title}</span>
-            <span class="text-[10px] text-slate-400 font-mono block">${ep.info && ep.info.duration ? ep.info.duration : 'Standard Episode'}</span>
+      <div class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-xl p-2.5 flex flex-col justify-between space-y-2 transition shadow-md group">
+        <div class="flex items-start justify-between gap-1.5">
+          <div class="min-w-0 flex-1">
+            <span class="text-[11px] font-bold text-white group-hover:text-brand-300 transition line-clamp-1">${title}</span>
+            <span class="text-[9px] text-slate-400 font-mono block">${ep.info && ep.info.duration ? ep.info.duration : 'Standard Episode'}</span>
           </div>
-          <span class="px-2 py-0.5 rounded-md bg-brand-950 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold shrink-0">${epNumStr}</span>
+          <span class="px-1.5 py-0.5 rounded bg-brand-950 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold shrink-0">${epNumStr}</span>
         </div>
-        <button onclick="window.playEpisodeStream('${epUrl}', '${title.replace(/'/g, "\\'")}')" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white font-semibold text-xs transition flex items-center justify-center gap-2 border border-slate-700/60 hover:border-brand-500 shadow active:scale-95">
-          <i class="fa-solid fa-play text-[10px] text-brand-400 group-hover:text-white"></i>Play Episode
+        <button onclick="window.playEpisodeStream('${epUrl}', '${title.replace(/'/g, "\\'")}')" class="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white font-semibold text-[11px] transition flex items-center justify-center gap-1.5 border border-slate-700/60 hover:border-brand-500 shadow active:scale-95">
+          <i class="fa-solid fa-play text-[9px] text-brand-400 group-hover:text-white"></i>Play Episode
         </button>
       </div>
     `;
@@ -232,14 +244,14 @@ export function toggleSeriesExpandView(): void {
   isSeriesExpanded = !isSeriesExpanded;
   if (isSeriesExpanded) {
     box.className =
-      'bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-7xl shadow-2xl relative h-[95vh] flex flex-col overflow-hidden transition-all duration-300';
+      'bg-slate-900 border border-slate-800 rounded-2xl w-[92vw] max-w-5xl shadow-2xl relative max-h-[92vh] flex flex-col overflow-hidden transition-all duration-300';
     if (label) label.textContent = 'Contract';
-    if (icon) icon.className = 'fa-solid fa-compress text-[11px]';
+    if (icon) icon.className = 'fa-solid fa-compress text-[10px]';
   } else {
     box.className =
-      'bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden transition-all duration-300';
+      'bg-slate-900 border border-slate-800 rounded-2xl w-[80vw] max-w-2xl shadow-2xl relative max-h-[80vh] flex flex-col overflow-hidden transition-all duration-300';
     if (label) label.textContent = 'Expand';
-    if (icon) icon.className = 'fa-solid fa-expand text-[11px]';
+    if (icon) icon.className = 'fa-solid fa-expand text-[10px]';
   }
 }
 
@@ -304,6 +316,15 @@ export async function openMovieExplorer(channel: Channel): Promise<void> {
   }
 
   modal.classList.remove('hidden');
+
+  setTimeout(() => {
+    const playBtn = document.getElementById('btn-play-movie-now') || modal.querySelector('button');
+    if (playBtn) {
+      document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(n => n.classList.remove('tv-focused', 'tv-focused-btn'));
+      playBtn.classList.add('tv-focused-btn');
+      playBtn.focus();
+    }
+  }, 50);
 
   const vodId = channel.vodId || (channel.id && channel.id.startsWith('xt_vod_') ? channel.id.replace('xt_vod_', '') : null);
   if (vodId && xtreamConnector) {

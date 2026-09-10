@@ -2,48 +2,56 @@ import { Channel, ChannelSource } from '../types';
 import { generateChannelId } from '../state/store';
 import { circuitBreaker } from '../player/circuit-breaker';
 import { showAppAlert } from '../ui/dialog';
+import { QuantumOfflineCache } from './cache';
 
 export function inferChannelLanguage(name = '', tvgId = '', group = ''): string | null {
   const text = `${name} ${tvgId} ${group}`.toLowerCase();
 
   if (
-    /tamil|wintv|win\s*tv|villagetv|village\s*tv|ultimatetv|ultimate\s*tv|sun\s*tv|kalaignar|vijay|zeetamil|polimer|puthiyathalaimurai|news7|jaya|captain|lotus|rajtv|thanthai|ddpodhigai|vettri|makkal|vendhar|isaiaruvi|seithigal|sirippoli|vasanth|chithiram|pepper|mega\s*tv|murasu/i.test(
-      text
-    )
-  ) {
-    return 'Tamil';
-  }
-  if (
-    /malayalam|kerala|kairali|asianet|manorama|mathrubhumi|mediaone|janam|flowers|amrita|kaumudy|reporter|zeekeralam|surya|kochu|ddmalayalam|darshana|goodness|shalom|harvest|acv|cmalayalam|anandtv/i.test(
+    /malayalam|kerala|\bmal\b|\[mal\]|\|mal\||mal:|mal\s*-|\bml\b|kairali|asianet|manorama|mathrubhumi|mediaone|janam|flowers|amrita|kaumudy|reporter|zeekeralam|surya|kochu|ddmalayalam|darshana|goodness|shalom|harvest|acv|cmalayalam|anandtv/i.test(
       text
     )
   ) {
     return 'Malayalam';
   }
   if (
-    /kannada|suvarna|publictv|public\s*tv|udaya|kasthuri|powertv|power\s*tv|rajnews.*kannada|ddchandana|colors.*kannada|zeekannada|bTV|vistara/i.test(
+    /tamil|\btam\b|\[tam\]|\|tam\||tam:|tam\s*-|\bta\b|wintv|win\s*tv|villagetv|village\s*tv|ultimatetv|ultimate\s*tv|sun\s*tv|kalaignar|vijay|zeetamil|polimer|puthiyathalaimurai|news7|jaya|captain|lotus|rajtv|thanthai|ddpodhigai|vettri|makkal|vendhar|isaiaruvi|seithigal|sirippoli|vasanth|chithiram|pepper|mega\s*tv|murasu/i.test(
+      text
+    )
+  ) {
+    return 'Tamil';
+  }
+  if (
+    /kannada|\bkan\b|\[kan\]|\|kan\||kan:|kan\s*-|\bkn\b|suvarna|publictv|public\s*tv|udaya|kasthuri|powertv|power\s*tv|rajnews.*kannada|ddchandana|colors.*kannada|zeekannada|bTV|vistara/i.test(
       text
     )
   ) {
     return 'Kannada';
   }
   if (
-    /telugu|tv9.*telugu|\bntv\b|\babn\b|\bv6\b|sakshi|\betv\b|tnews|t\s*news|zeetelugu|gemini|mahaa|\b10tv\b|\b99tv\b|\b6tv\b|ddyadagiri|ddsaptagiri|subhavaartha|bhakthi|svbc|hmtv|prime9|studio\s*n/i.test(
+    /telugu|\btel\b|\[tel\]|\|tel\||tel:|tel\s*-|\bte\b|tv9.*telugu|\bntv\b|\babn\b|\bv6\b|sakshi|\betv\b|tnews|t\s*news|zeetelugu|gemini|mahaa|\b10tv\b|\b99tv\b|\b6tv\b|ddyadagiri|ddsaptagiri|subhavaartha|bhakthi|svbc|hmtv|prime9|studio\s*n/i.test(
       text
     )
   ) {
     return 'Telugu';
   }
   if (
-    /hindi|aajtak|abpnews|indiatv|republicbharat|zeenews|ndtvindia|news18india|tv9bharatvarsh|ddnational|news24/i.test(
+    /hindi|\bhin\b|\[hin\]|\|hin\||hin:|hin\s*-|\bhi\b|aajtak|abpnews|indiatv|republicbharat|zeenews|ndtvindia|news18india|tv9bharatvarsh|ddnational|news24|starplus|sonytv|colors|zeetv/i.test(
       text
     )
   ) {
     return 'Hindi';
   }
+  if (
+    /english|\beng\b|\[eng\]|\|eng\||eng:|eng\s*-|\ben\b|bbc|cnn|aljazeera|bloomberg|discovery|natgeo|hbo/i.test(
+      text
+    )
+  ) {
+    return 'English';
+  }
 
   const langMatch = text.match(
-    /\b(malayalam|kannada|hindi|tamil|telugu|english|french|german|spanish|bengali|marathi|punjabi|gujarati|bhojpuri|odia|assamese)\b/i
+    /\b(malayalam|kannada|hindi|tamil|telugu|english|french|german|spanish|bengali|marathi|punjabi|gujarati|bhojpuri|odia|assamese|urdu|arabic)\b/i
   );
   if (langMatch) {
     return langMatch[1].charAt(0).toUpperCase() + langMatch[1].slice(1).toLowerCase();
@@ -399,11 +407,20 @@ export async function loadM3uSinglePlaylist(
 
   try {
     let content = '';
-    try {
-      const { fetchWithProxyFallback } = await import('./proxy');
-      content = await fetchWithProxyFallback(url);
-    } catch (e: any) {
-      console.warn('Proxy fetch failed in loadM3uSinglePlaylist for:', url, e.message);
+    // Check local offline cache first for instant load
+    const cached = await QuantumOfflineCache.getCachedPlaylist(url);
+    if (cached && cached.content) {
+      content = cached.content;
+    } else {
+      try {
+        const { fetchWithProxyFallback } = await import('./proxy');
+        content = await fetchWithProxyFallback(url);
+        if (content && (content.includes('#EXTINF') || content.includes('#EXTM3U'))) {
+          QuantumOfflineCache.cachePlaylist(url, content, 0).catch(() => {});
+        }
+      } catch (e: any) {
+        console.warn('Proxy fetch failed in loadM3uSinglePlaylist for:', url, e.message);
+      }
     }
 
     if (!content || (!content.includes('#EXTINF') && !content.includes('#EXTM3U'))) {

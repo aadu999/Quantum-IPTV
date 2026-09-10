@@ -1,7 +1,20 @@
 {
   "name": "quantum-stream-platform",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0-beta",
+  "description": "Next-Gen Quantum IPTV & IoT Remote TV Player with Zero-FOUT offline styling, Malayalam presets, and Android TV spatial navigation.",
+  "author": "Adarsh Raveendran <hello@adarsh.one> (https://github.com/aadu999)",
+  "contributors": [
+    {
+      "name": "Adarsh Raveendran",
+      "email": "hello@adarsh.one",
+      "url": "https://github.com/aadu999"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aadu999/Quantum-IPTV.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,10 +27,16 @@
     "@capacitor/android": "^8.5.1",
     "@capacitor/cli": "^7.6.9",
     "@capacitor/core": "^8.5.1",
-    "hls.js": "^1.5.8"
+    "hls.js": "^1.5.8",
+    "mqtt": "^5.15.2",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.6",
+    "autoprefixer": "^10.5.5",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
   }

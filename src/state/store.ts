@@ -61,6 +61,56 @@ export const DEFAULT_PRESET_CHANNELS: Channel[] = [
     program: "Nonstop Live News Desk"
   },
   {
+    id: "24-news-malayalam",
+    name: "24 News (576p)",
+    logo: "https://sund-images.sunnxt.com/202222/300x300_24News_202222_d63feca0-79ae-47ea-b75a-66c17d456f4c.png",
+    group: "News",
+    country: "IN",
+    language: "Malayalam",
+    url: "https://mumt07.tangotv.in/zHjX9OFlTWENTYFOURNEWS/index.m3u8",
+    program: "24 Round The Clock Malayalam News"
+  },
+  {
+    id: "amrita-tv-malayalam",
+    name: "Amrita TV (720p)",
+    logo: "https://i.imgur.com/WdSjlPl.png",
+    group: "Entertainment",
+    country: "IN",
+    language: "Malayalam",
+    url: "https://ddash74r36xqp.cloudfront.net/master.m3u8",
+    program: "Amrita Prime Serial & Music Shows"
+  },
+  {
+    id: "mathrubhumi-news",
+    name: "Mathrubhumi News (576p)",
+    logo: "https://i.imgur.com/diQftzP.png",
+    group: "News",
+    country: "IN",
+    language: "Malayalam",
+    url: "https://streams.tangotv.in/MATHRUBHUMINEWS/ORIGIN/index.m3u8",
+    program: "Mathrubhumi Prime Discussions"
+  },
+  {
+    id: "media-one-malayalam",
+    name: "Media One (720p)",
+    logo: "https://xstreamcp-assets-msp.streamready.in/assets/LIVETV/LIVECHANNEL/LIVETV_LIVETVCHANNEL_MEDIA_ONE/images/LOGO_HD/image.png",
+    group: "News",
+    country: "IN",
+    language: "Malayalam",
+    url: "https://cdn-3.pishow.tv/live/1481/master.m3u8",
+    program: "Media One Special Focus"
+  },
+  {
+    id: "reporter-tv-malayalam",
+    name: "Reporter TV (576p)",
+    logo: "https://dtil.tmsimg.com/assets/s85096_ld_h15_aa.png?lock=720x540",
+    group: "News",
+    country: "IN",
+    language: "Malayalam",
+    url: "https://segment.yuppcdn.net/050522/reporter/playlist.m3u8",
+    program: "Reporter Live Breaking News"
+  },
+  {
     id: "jaya-tv-hd",
     name: "Jaya TV (Tamil)",
     logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jaya_TV_Logo.png/512px-Jaya_TV_Logo.png",

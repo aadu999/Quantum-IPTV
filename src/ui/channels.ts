@@ -5,6 +5,7 @@ import { userProfile } from '../state/user-profile';
 import { circuitBreaker } from '../player/circuit-breaker';
 import { broadcastTVState, sendRemoteCmd } from '../services/remote';
 import { xtreamConnector, getXtreamCredentials } from '../services/xtream';
+import { inferChannelLanguage } from '../services/m3u';
 import { QuantumStreamEngine } from '../player/engine';
 
 let engineInstance: QuantumStreamEngine | null = null;
@@ -20,16 +21,29 @@ export function playChannel(index: number, options: { directPlay?: boolean } = {
   const channel = state.filteredChannels[index];
   if (!channel) return;
 
-  if (!options.directPlay) {
-    if (channel.type === 'series' || (channel.url && channel.url.includes('/series/'))) {
-      (window as any).openSeriesExplorer?.(channel);
-      return;
-    }
+  const isSeries =
+    channel.type === 'series' ||
+    Boolean(channel.seriesId) ||
+    (Boolean(channel.url) && channel.url.includes('/series/'));
 
-    if (channel.type === 'vod' || (channel.url && channel.url.includes('/movie/'))) {
-      (window as any).openMovieExplorer?.(channel);
-      return;
-    }
+  const isVod =
+    channel.type === 'vod' ||
+    Boolean(channel.vodId) ||
+    (Boolean(channel.url) && channel.url.includes('/movie/'));
+
+  // Selecting any series or movie must ALWAYS display its info dialogue box
+  if (isSeries) {
+    (window as any).openSeriesExplorer?.(channel);
+    renderChannelList();
+    renderQuickChannelStrip();
+    return;
+  }
+
+  if (isVod) {
+    (window as any).openMovieExplorer?.(channel);
+    renderChannelList();
+    renderQuickChannelStrip();
+    return;
   }
 
   (window as any).closeModals?.();
@@ -50,6 +64,7 @@ export function playChannel(index: number, options: { directPlay?: boolean } = {
 
   engineInstance?.load(channel.url);
   renderChannelList();
+  renderQuickChannelStrip();
   broadcastTVState();
   try {
     (window as any).adjustMobileVideoStage?.();
@@ -93,23 +108,30 @@ export function tuneToChannel(target: Partial<Channel>): void {
 export function toggleFavorite(channelId: string, evt?: Event): void {
   if (evt) evt.stopPropagation();
   const idx = state.favorites.indexOf(channelId);
+  let isNowFav = false;
   if (idx > -1) {
     state.favorites.splice(idx, 1);
   } else {
     state.favorites.push(channelId);
+    isNowFav = true;
   }
   localStorage.setItem('quantum_iptv_favs', JSON.stringify(state.favorites));
   updateFavoritesUI();
   renderChannelList();
   broadcastTVState();
+
+  const ch = state.channels.find(c => c.id === channelId);
+  (window as any).showTvFavoriteToast?.(isNowFav, ch?.name || 'Channel');
 }
 
 export function updateFavoritesUI(): void {
   const favCountBadge = document.getElementById('fav-count-badge');
+  const favPillCount = document.getElementById('fav-pill-count');
   const favoritesListContainer = document.getElementById('favorites-list-container');
   const favoritesEmptyMsg = document.getElementById('favorites-empty-msg');
 
   if (favCountBadge) favCountBadge.textContent = String(state.favorites.length);
+  if (favPillCount) favPillCount.textContent = String(state.favorites.length);
   if (!favoritesListContainer) return;
 
   const favChannels = state.channels.filter(ch => state.favorites.includes(ch.id));
@@ -120,8 +142,10 @@ export function updateFavoritesUI(): void {
     if (favoritesEmptyMsg) favoritesEmptyMsg.classList.add('hidden');
     favoritesListContainer.innerHTML = favChannels
       .map(
-        ch => `
-        <div onclick="window.tuneToChannel({ id: '${ch.id}', url: '${ch.url}', name: '${ch.name}' })" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition">
+        ch => {
+          const globalIdx = state.channels.findIndex(c => c.id === ch.id);
+          return `
+        <div data-channel-id="${ch.id}" tabindex="0" onclick="window.playChannel(${globalIdx >= 0 ? globalIdx : 0})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition rounded-xl border border-transparent focus:border-brand-500 focus:bg-slate-800/90 mb-1">
           <div class="flex items-center gap-2.5 overflow-hidden">
             <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-6 h-6 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
             <div class="overflow-hidden">
@@ -129,11 +153,12 @@ export function updateFavoritesUI(): void {
               <div class="text-[10px] text-slate-400 truncate">${ch.group || 'Live'}</div>
             </div>
           </div>
-          <button onclick="window.toggleFavorite('${ch.id}', event)" class="text-amber-400 p-1 text-xs hover:scale-110 transition">
+          <button onclick="window.toggleFavorite('${ch.id}', event)" class="text-amber-400 p-1 text-xs hover:scale-110 transition focus:outline-none" title="Remove Favorite">
             <i class="fa-solid fa-star"></i>
           </button>
         </div>
-      `
+      `;
+        }
       )
       .join('');
   }
@@ -141,15 +166,15 @@ export function updateFavoritesUI(): void {
 
 export function filterContentType(type: string): void {
   (state as any).contentTypeFilter = type;
-  const pills = ['all', 'recommended', 'live', 'vod', 'series', 'catchup'];
+  const pills = ['all', 'favs', 'recommended', 'live', 'vod', 'series', 'catchup'];
   pills.forEach(p => {
     const btn = document.getElementById(`pill-type-${p}`);
     if (btn) {
       if (p === type.toLowerCase() || (type === 'ALL' && p === 'all')) {
-        btn.className = 'px-2 py-0.5 rounded-full bg-brand-600 text-white font-semibold whitespace-nowrap transition';
+        btn.className = 'px-2 py-0.5 rounded-full bg-brand-600 text-white font-semibold whitespace-nowrap transition flex items-center gap-1';
       } else {
         btn.className =
-          'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition';
+          'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 hover:text-white font-medium whitespace-nowrap transition flex items-center gap-1';
       }
     }
   });
@@ -181,6 +206,7 @@ export function filterChannels(): void {
     const matchesType =
       typeFilter === 'ALL' ||
       typeFilter === 'recommended' ||
+      (typeFilter === 'favs' && state.favorites.includes(ch.id)) ||
       (typeFilter === 'live' && (!ch.type || ch.type === 'live')) ||
       (typeFilter === 'vod' && ch.type === 'vod') ||
       (typeFilter === 'series' && ch.type === 'series') ||
@@ -198,7 +224,10 @@ export function filterChannels(): void {
     const matchesCategory =
       category === 'ALL' || (ch.group && ch.group.toLowerCase().includes(category.toLowerCase()));
     const matchesLanguage =
-      language === 'ALL' || (ch.language && ch.language.toLowerCase().includes(language.toLowerCase()));
+      language === 'ALL' ||
+      (ch.language && ch.language.toLowerCase() === language.toLowerCase()) ||
+      (ch.group && ch.group.toLowerCase().includes(language.toLowerCase())) ||
+      (ch.name && ch.name.toLowerCase().includes(language.toLowerCase()));
 
     return matchesType && matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
   });
@@ -252,7 +281,7 @@ export function renderChannelList(): void {
       const sourceCount = ch.sources ? ch.sources.length : 1;
 
       return `
-      <div onclick="window.playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${
+      <div data-channel-id="${ch.id}" tabindex="0" onclick="window.playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${
         isActive ? 'bg-brand-950/60 border-l-4 border-brand-500 pl-2' : ''
       }">
         <div class="flex items-center gap-2.5 overflow-hidden">
@@ -283,10 +312,10 @@ export function renderChannelList(): void {
             </div>
           </div>
         </div>
-        <button onclick="window.toggleFavorite('${ch.id}', event)" class="p-1.5 text-xs ${
+        <button tabindex="-1" onclick="window.toggleFavorite('${ch.id}', event)" class="channel-fav-btn p-1.5 text-xs ${
           isFav ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'
-        } transition hover:scale-110">
-          <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+        } transition hover:scale-110 shrink-0" title="Add to Favorite (Right Arrow)">
+          <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star pointer-events-none"></i>
         </button>
       </div>
     `;
@@ -303,16 +332,83 @@ export function renderChannelList(): void {
   }
 
   viewChannels.innerHTML = html;
+  renderQuickChannelStrip();
+}
+
+export function renderQuickChannelStrip(): void {
+  const strip = document.getElementById('tv-quick-channel-strip');
+  if (!strip || state.isRemoteClient) return;
+
+  if (state.filteredChannels.length === 0) {
+    strip.innerHTML = '';
+    return;
+  }
+
+  const total = state.filteredChannels.length;
+  const start = Math.max(0, Math.min(total - 35, state.currentChannelIndex - 8));
+  const slice = state.filteredChannels.slice(start, start + 35);
+
+  const html = slice
+    .map((ch, relativeIdx) => {
+      const actualIndex = start + relativeIdx;
+      const isActive = actualIndex === state.currentChannelIndex;
+      const isFav = state.favorites.includes(ch.id);
+
+      return `
+        <div data-quick-channel-idx="${actualIndex}" onclick="window.playChannel(${actualIndex})" tabindex="0" class="shrink-0 w-44 p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition-all duration-150 backdrop-blur-md ${
+          isActive
+            ? 'bg-brand-600/30 border-2 border-brand-400 shadow-[0_0_15px_rgba(99,102,241,0.6)] scale-[1.03]'
+            : 'bg-slate-900/80 border border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600'
+        }">
+          <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded-lg object-contain bg-slate-950 p-0.5 border border-slate-700 shrink-0">
+          <div class="overflow-hidden flex-1 text-left">
+            <div class="flex items-center justify-between">
+              <span class="text-[9px] font-mono font-bold ${isActive ? 'text-brand-300' : 'text-slate-400'}">CH ${actualIndex + 1}</span>
+              ${isFav ? '<i class="fa-solid fa-star text-[8px] text-amber-400"></i>' : ''}
+            </div>
+            <div class="text-xs font-semibold text-white truncate leading-tight mt-0.5">${ch.name}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  strip.innerHTML = html;
+
+  const activeCard = strip.querySelector(`[data-quick-channel-idx="${state.currentChannelIndex}"]`) as HTMLElement | null;
+  if (activeCard) {
+    activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
 }
 
 export function updateLanguageDropdown(): void {
-  const languageFilter = document.getElementById('language-filter');
+  const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;
   if (!languageFilter) return;
+
+  const currentVal = languageFilter.value || 'Malayalam';
+
+  const standardLangs = ['Malayalam', 'Tamil', 'Hindi', 'Telugu', 'Kannada', 'English'];
 
   const langCounts: Record<string, number> = {};
   state.channels.forEach(ch => {
+    if (!ch.language) {
+      const inf = inferChannelLanguage(ch.name, ch.tvgId, ch.group);
+      if (inf) ch.language = inf;
+    }
     if (ch.language) {
       langCounts[ch.language] = (langCounts[ch.language] || 0) + 1;
+    }
+  });
+
+  // Ensure popular languages are present if any channel matches by group or name
+  standardLangs.forEach(sl => {
+    if (!langCounts[sl]) {
+      const matches = state.channels.filter(
+        ch =>
+          (ch.group && ch.group.toLowerCase().includes(sl.toLowerCase())) ||
+          (ch.name && ch.name.toLowerCase().includes(sl.toLowerCase()))
+      ).length;
+      if (matches > 0) langCounts[sl] = matches;
     }
   });
 
@@ -320,9 +416,25 @@ export function updateLanguageDropdown(): void {
 
   let html = `<option value="ALL">All Languages (${state.channels.length.toLocaleString()})</option>`;
   sortedLangs.forEach(lang => {
-    html += `<option value="${lang}">${lang} (${langCounts[lang].toLocaleString()})</option>`;
+    const isSelected = lang.toLowerCase() === currentVal.toLowerCase() ? ' selected' : '';
+    html += `<option value="${lang}"${isSelected}>${lang} (${langCounts[lang].toLocaleString()})</option>`;
   });
   languageFilter.innerHTML = html;
+
+  if (currentVal) {
+    const matchedOpt = Array.from(languageFilter.options).find(
+      o => o.value.toLowerCase() === currentVal.toLowerCase()
+    );
+    if (matchedOpt) {
+      languageFilter.value = matchedOpt.value;
+    }
+  }
+
+  const labelEl = document.getElementById('label-language-filter');
+  if (labelEl) {
+    const opt = languageFilter.options[languageFilter.selectedIndex];
+    labelEl.textContent = opt ? opt.text : (currentVal || 'Malayalam');
+  }
 }
 
 // Remote Channels List
@@ -389,12 +501,14 @@ export function renderRemoteChannelsList(): void {
   }
 
   const sliceLimit = state.remoteLimit || 60;
+  const curPlayingId = document.getElementById('remote-now-channel')?.getAttribute('data-id');
   const displayChannels = list.slice(0, sliceLimit);
   const hasMore = list.length > sliceLimit;
 
   let html = displayChannels
     .map(ch => {
       const isFav = state.favorites.includes(ch.id);
+      const isPlayingOnTv = curPlayingId && ch.id === curPlayingId;
       const safeName = (ch.name || 'Stream Channel').replace(/'/g, "\\'");
       const safeUrl = (ch.url || '').replace(/'/g, "\\'");
       const safeLogo = (ch.logo || '').replace(/'/g, "\\'");
@@ -415,11 +529,18 @@ export function renderRemoteChannelsList(): void {
       }
 
       return `
-      <div onclick="${clickHandler}" class="p-2.5 bg-slate-900 rounded-xl flex items-center justify-between active:bg-slate-800 transition cursor-pointer">
+      <div onclick="${clickHandler}" class="p-2.5 rounded-xl flex items-center justify-between active:bg-slate-800 transition cursor-pointer ${
+        isPlayingOnTv
+          ? 'bg-brand-950/70 border-2 border-brand-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]'
+          : 'bg-slate-900 border border-slate-800/80 hover:bg-slate-850'
+      }">
         <div class="flex items-center gap-3 overflow-hidden">
           <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
           <div class="text-left overflow-hidden">
-            <div class="text-xs font-semibold text-white truncate">${ch.name}</div>
+            <div class="text-xs font-semibold ${isPlayingOnTv ? 'text-brand-300' : 'text-white'} truncate flex items-center gap-1.5">
+              <span>${ch.name}</span>
+              ${isPlayingOnTv ? '<span class="px-1.5 py-0.2 rounded bg-brand-500/30 text-brand-300 text-[8px] font-bold uppercase tracking-wider animate-pulse">ON TV</span>' : ''}
+            </div>
             <div class="text-[10px] text-slate-400">${badgeTag} · ${ch.group || 'Stream'}</div>
           </div>
         </div>
@@ -429,7 +550,7 @@ export function renderRemoteChannelsList(): void {
           } active:scale-125 transition">
             <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
           </button>
-          <div class="w-7 h-7 rounded-lg bg-brand-600/20 text-brand-400 flex items-center justify-center">
+          <div class="w-7 h-7 rounded-lg ${isPlayingOnTv ? 'bg-brand-500 text-white' : 'bg-brand-600/20 text-brand-400'} flex items-center justify-center">
             <i class="fa-solid ${iconClass} text-[10px]"></i>
           </div>
         </div>
@@ -788,4 +909,5 @@ export function loadMoreRemoteChannels(): void {
 (window as any).selectRemoteSeriesSeason = selectRemoteSeriesSeason;
 (window as any).clearRemoteSearch = clearRemoteSearch;
 (window as any).loadMoreRemoteChannels = loadMoreRemoteChannels;
+(window as any).renderQuickChannelStrip = renderQuickChannelStrip;
 

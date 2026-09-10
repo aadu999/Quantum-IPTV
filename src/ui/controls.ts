@@ -207,56 +207,133 @@ export function showTvVolumeHud(volume?: number, isMuted?: boolean): void {
 export function unmuteAudioNow(): void {
   const video = document.getElementById('video-player') as HTMLVideoElement | null;
   const btnMute = document.getElementById('btn-mute');
-  const unmuteBanner = document.getElementById('unmute-banner');
 
   if (video) {
     video.muted = false;
+    if (video.volume <= 0) video.volume = 1.0;
     if (btnMute) btnMute.innerHTML = '<i class="fa-solid fa-volume-high text-xs"></i>';
     showTvVolumeHud(video.volume, false);
   }
-  if (unmuteBanner) unmuteBanner.classList.add('hidden');
   broadcastTVState();
 }
 
 export function toggleMute(): void {
   const video = document.getElementById('video-player') as HTMLVideoElement | null;
+  if (video) {
+    video.muted = false;
+  }
+
+  // Synchronize with native Android TV hardware audio manager
+  try {
+    const nativeBridge = (window as any).AndroidTvNative;
+    if (nativeBridge) {
+      nativeBridge.toggleMute?.();
+    }
+  } catch (e) {}
+
+  broadcastTVState();
+}
+
+export function handleNativeVolumeUp(): void {
+  const video = document.getElementById('video-player') as HTMLVideoElement | null;
   const btnMute = document.getElementById('btn-mute');
   const unmuteBanner = document.getElementById('unmute-banner');
+  const volSlider = document.getElementById('vol-slider') as HTMLInputElement | null;
 
   if (!video) return;
 
-  video.muted = !video.muted;
-  if (btnMute) {
-    btnMute.innerHTML = video.muted
-      ? '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>'
-      : '<i class="fa-solid fa-volume-high text-xs"></i>';
-  }
-  if (!video.muted && unmuteBanner) {
-    unmuteBanner.classList.add('hidden');
+  video.muted = false;
+  try {
+    (window as any).AndroidTvNative?.unmute?.();
+  } catch (e) {}
+
+  video.volume = Math.min(1, Math.round((video.volume + 0.05) * 100) / 100);
+  if (volSlider) volSlider.value = String(video.volume);
+  if (btnMute) btnMute.innerHTML = '<i class="fa-solid fa-volume-high text-xs"></i>';
+  if (unmuteBanner) unmuteBanner.classList.add('hidden');
+  showTvVolumeHud(video.volume, false);
+  broadcastTVState();
+}
+
+export function handleNativeVolumeDown(): void {
+  const video = document.getElementById('video-player') as HTMLVideoElement | null;
+  const btnMute = document.getElementById('btn-mute');
+  const volSlider = document.getElementById('vol-slider') as HTMLInputElement | null;
+
+  if (!video) return;
+
+  video.volume = Math.max(0, Math.round((video.volume - 0.05) * 100) / 100);
+  if (volSlider) volSlider.value = String(video.volume);
+  if (video.volume === 0 && btnMute) {
+    btnMute.innerHTML = '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>';
   }
   showTvVolumeHud(video.volume, video.muted);
   broadcastTVState();
 }
 
-export function seekVideo(secondsDelta: number): void {
+export function isCurrentContentSeekable(): boolean {
+  if (!engineInstance || !engineInstance.video) return false;
+  const currentCh = state.filteredChannels[state.currentChannelIndex] || state.channels[state.currentChannelIndex];
+  const video = engineInstance.video;
+  const hasFiniteDuration = Boolean(video.duration && isFinite(video.duration) && video.duration > 0);
+  
+  if (!hasFiniteDuration) return false;
+  if (!currentCh) return hasFiniteDuration;
+
+  // Seeking is restricted to movies and series
+  const isMovieOrSeries =
+    currentCh.type === 'vod' ||
+    currentCh.type === 'series' ||
+    Boolean(currentCh.vodId) ||
+    Boolean(currentCh.seriesId) ||
+    (Boolean(currentCh.url) && (currentCh.url.includes('/movie/') || currentCh.url.includes('/series/')));
+
+  return isMovieOrSeries;
+}
+
+export function seekVideo(secondsDelta: number, fromExplicitSeekBar = false): void {
   if (!engineInstance || !engineInstance.video) return;
+  if (!isCurrentContentSeekable()) return;
+
+  // Seeking can happen ONLY when the user selects the seek bar on movies and series
+  const seekBar = document.getElementById('seek-bar-container');
+  const isSelected =
+    fromExplicitSeekBar ||
+    (seekBar && (
+      document.activeElement === seekBar ||
+      seekBar.classList.contains('tv-focused-btn') ||
+      seekBar.classList.contains('tv-focused') ||
+      Boolean(seekBar.matches && seekBar.matches(':focus'))
+    ));
+
+  if (!isSelected) {
+    return;
+  }
+
   const video = engineInstance.video;
   if (video.duration && isFinite(video.duration)) {
     video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + secondsDelta));
     updateTimeAndSeekBar();
+    wakeControls();
   }
 }
 
 export function handleSeekBarClick(e: MouseEvent): void {
-  if (!engineInstance || !engineInstance.video || !engineInstance.video.duration || !isFinite(engineInstance.video.duration))
-    return;
+  if (!engineInstance || !engineInstance.video || !isCurrentContentSeekable()) return;
   const container = document.getElementById('seek-bar-container');
   if (!container) return;
+
+  // Focus the seek bar on click so future keyboard / remote left-right commands seek directly
+  container.focus();
+  document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(n => n.classList.remove('tv-focused', 'tv-focused-btn'));
+  container.classList.add('tv-focused-btn');
+
   const rect = container.getBoundingClientRect();
   const clickX = e.clientX - rect.left;
   const percent = Math.max(0, Math.min(1, clickX / rect.width));
   engineInstance.video.currentTime = percent * engineInstance.video.duration;
   updateTimeAndSeekBar();
+  wakeControls();
 }
 
 export function updateTimeAndSeekBar(): void {
@@ -271,8 +348,15 @@ export function updateTimeAndSeekBar(): void {
   const progressPlayed = document.getElementById('progress-played');
   const progressBuffer = document.getElementById('progress-buffer');
   const seekHandle = document.getElementById('seek-handle');
+  const seekBar = document.getElementById('seek-bar-container');
 
-  if (dur && isFinite(dur) && dur > 0) {
+  const seekable = isCurrentContentSeekable();
+
+  if (seekable && dur && isFinite(dur) && dur > 0) {
+    if (seekBar) {
+      seekBar.setAttribute('tabindex', '0');
+      seekBar.classList.remove('pointer-events-none', 'opacity-40');
+    }
     if (timeContainer) timeContainer.classList.remove('hidden');
     if (curLabel) curLabel.textContent = formatTimestamp(curTime);
     if (durLabel) durLabel.textContent = formatTimestamp(dur);
@@ -287,6 +371,11 @@ export function updateTimeAndSeekBar(): void {
       if (progressBuffer) progressBuffer.style.width = `${bufPercent}%`;
     }
   } else {
+    // Live stream or unseekable content
+    if (seekBar) {
+      seekBar.setAttribute('tabindex', '-1');
+      seekBar.classList.add('pointer-events-none', 'opacity-40');
+    }
     if (timeContainer) timeContainer.classList.add('hidden');
     if (progressPlayed) progressPlayed.style.width = '100%';
     if (seekHandle) seekHandle.style.left = '100%';
@@ -364,6 +453,11 @@ export function adjustMobileVideoStage(): void {
 (window as any).playNextWorkingChannel = playNextWorkingChannel;
 (window as any).showTvVolumeHud = showTvVolumeHud;
 (window as any).toggleMute = toggleMute;
+(window as any).handleNativeVolumeUp = handleNativeVolumeUp;
+(window as any).handleNativeVolumeDown = handleNativeVolumeDown;
 (window as any).adjustMobileVideoStage = adjustMobileVideoStage;
 (window as any).showEngineHud = showEngineHud;
+(window as any).isCurrentContentSeekable = isCurrentContentSeekable;
+(window as any).updateTimeAndSeekBar = updateTimeAndSeekBar;
+(window as any).state = state;
 

@@ -55,11 +55,13 @@ export function initRemoteSync(): void {
         const cmdTopic = `quantum_tv/${state.roomId}/cmd`;
         const stateTopic = `quantum_tv/${state.roomId}/state`;
         const catalogTopic = `quantum_tv/${state.roomId}/catalog`;
+        const chunkTopic = `quantum_tv/${state.roomId}/catalog_chunk`;
         const presenceTopic = `quantum_tv/${state.roomId}/presence`;
 
         if (state.isRemoteClient) {
           mqttClient.subscribe(stateTopic);
           mqttClient.subscribe(catalogTopic);
+          mqttClient.subscribe(chunkTopic);
           const statEl = document.getElementById('remote-conn-status');
           if (statEl) statEl.textContent = 'Connected to TV';
           mqttClient.publish(presenceTopic, JSON.stringify({ event: 'connected', sender: 'remote', roomId: state.roomId, time: Date.now() }));
@@ -79,6 +81,7 @@ export function initRemoteSync(): void {
           if (state.isRemoteClient) {
             if (topic.endsWith('/state')) updateRemoteStateView(data);
             if (topic.endsWith('/catalog')) handleIncomingCatalogSync(data);
+            if (topic.endsWith('/catalog_chunk')) handleIncomingCatalogChunk(data);
           } else {
             if (topic.endsWith('/presence')) {
               dismissRemoteModalOnConnect();
@@ -164,25 +167,84 @@ export function broadcastTVCatalog(): void {
 
   if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_CATALOG', payload: catalogData });
   if (mqttClient && mqttClient.connected) {
-    const lightCatalog = {
-      channels: ordered.slice(0, 200),
+    // 1. Send catalog header with channel counts and session
+    const catalogHeader = {
       channelCount: state.channels ? state.channels.length : 0,
-      session: session
+      seriesCount: series.length,
+      movieCount: movies.length,
+      session: session,
+      favorites: state.favorites
     };
-    mqttClient.publish(`quantum_tv/${state.roomId}/catalog`, JSON.stringify(lightCatalog));
+    mqttClient.publish(`quantum_tv/${state.roomId}/catalog`, JSON.stringify(catalogHeader));
+
+    // 2. Transmit TV Series in compact chunks over MQTT
+    if (series.length > 0) {
+      const chunkSize = 80;
+      const totalSeriesChunks = Math.ceil(series.length / chunkSize);
+      for (let i = 0; i < totalSeriesChunks; i++) {
+        const chunkItems = series.slice(i * chunkSize, (i + 1) * chunkSize).map(s => ({
+          id: s.id,
+          name: s.name,
+          logo: s.logo || s.cover,
+          cover: s.cover || s.logo,
+          group: s.group || 'TV Series',
+          seriesId: s.seriesId,
+          genre: s.genre,
+          rating: s.rating,
+          plot: s.plot,
+          type: 'series',
+          url: s.url
+        }));
+        const chunkPayload = {
+          type: 'series',
+          chunkIndex: i,
+          totalChunks: totalSeriesChunks,
+          items: chunkItems
+        };
+        setTimeout(() => {
+          if (mqttClient && mqttClient.connected) {
+            mqttClient.publish(`quantum_tv/${state.roomId}/catalog_chunk`, JSON.stringify(chunkPayload));
+          }
+        }, i * 60);
+      }
+    }
+
+    // 3. Transmit sample movies in compact chunks over MQTT
+    if (movies.length > 0) {
+      const movieChunkSize = 80;
+      const totalMovieChunks = Math.min(5, Math.ceil(movies.length / movieChunkSize));
+      for (let i = 0; i < totalMovieChunks; i++) {
+        const chunkItems = movies.slice(i * movieChunkSize, (i + 1) * movieChunkSize).map(m => ({
+          id: m.id,
+          name: m.name,
+          logo: m.logo || m.cover,
+          cover: m.cover || m.logo,
+          group: m.group || 'Movies',
+          vodId: m.vodId,
+          genre: m.genre,
+          rating: m.rating,
+          plot: m.plot,
+          type: 'vod',
+          url: m.url
+        }));
+        const chunkPayload = {
+          type: 'vod',
+          chunkIndex: i,
+          totalChunks: totalMovieChunks,
+          items: chunkItems
+        };
+        setTimeout(() => {
+          if (mqttClient && mqttClient.connected) {
+            mqttClient.publish(`quantum_tv/${state.roomId}/catalog_chunk`, JSON.stringify(chunkPayload));
+          }
+        }, 650 + i * 60);
+      }
+    }
   }
 }
 
 export async function handleIncomingCatalogSync(payload: any): Promise<void> {
   if (!payload) return;
-
-  if (Array.isArray(payload.channels) && payload.channels.length > 0) {
-    if (!state.channels || state.channels.length <= payload.channels.length || state.channels.length <= 5) {
-      state.channels = payload.channels;
-      state.filteredChannels = [...state.channels];
-      QuantumSessionStore.saveChannels(state.channels);
-    }
-  }
 
   if (payload.session) {
     if (payload.session.xtreamHost) {
@@ -193,18 +255,49 @@ export async function handleIncomingCatalogSync(payload: any): Promise<void> {
     QuantumSessionStore.saveSession(payload.session);
   }
 
-  if (state.isRemoteClient) {
-    if (state.channels.length <= 5) {
-      const creds = getXtreamCredentials();
-      if (creds && creds.host && creds.username && creds.password) {
-        try {
-          await xtreamConnector.fetchXtreamPlaylist(creds.host, creds.username, creds.password);
-          QuantumSessionStore.saveChannels(state.channels);
-        } catch (e) {}
-      }
+  if (Array.isArray(payload.favorites) && payload.favorites.length > 0) {
+    state.favorites = Array.from(new Set([...state.favorites, ...payload.favorites]));
+    localStorage.setItem('quantum_iptv_favs', JSON.stringify(state.favorites));
+    (window as any).renderRemoteFavsList?.();
+  }
+
+  if (Array.isArray(payload.channels) && payload.channels.length > 0) {
+    if (!state.channels || state.channels.length <= payload.channels.length || state.channels.length <= 15) {
+      state.channels = payload.channels;
+      state.filteredChannels = [...state.channels];
+      QuantumSessionStore.saveChannels(state.channels);
     }
+  }
+
+  if (state.isRemoteClient) {
     (window as any).renderRemoteChannelsList?.();
     (window as any).renderRemoteFavsList?.();
+  }
+}
+
+export function handleIncomingCatalogChunk(payload: any): void {
+  if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) return;
+
+  const existingIds = new Set(state.channels.map(c => c.id));
+  let added = 0;
+  for (const item of payload.items) {
+    if (!existingIds.has(item.id)) {
+      state.channels.push(item);
+      existingIds.add(item.id);
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    QuantumSessionStore.saveChannels(state.channels);
+    (window as any).renderRemoteChannelsList?.();
+    const statusMsg = document.getElementById('rem-cfg-status-msg');
+    if (statusMsg) {
+      const seriesCount = state.channels.filter(c => c.type === 'series').length;
+      statusMsg.textContent = `✓ Synced ${seriesCount} TV Series from TV!`;
+      statusMsg.classList.remove('hidden');
+      setTimeout(() => statusMsg.classList.add('hidden'), 4000);
+    }
   }
 }
 
@@ -246,11 +339,8 @@ export function handleIncomingRemoteCommand(msg: any): void {
   const volSlider = document.getElementById('vol-slider') as HTMLInputElement | null;
 
   switch (msg.action) {
+    case 'REQUEST_CATALOG_SYNC':
     case 'REMOTE_JOINED':
-      dismissRemoteModalOnConnect();
-      broadcastTVState();
-      broadcastTVCatalog();
-      break;
     case 'REQUEST_SYNC':
       dismissRemoteModalOnConnect();
       broadcastTVState();
@@ -314,7 +404,7 @@ export function handleIncomingRemoteCommand(msg: any): void {
       break;
     case 'SEEK_DELTA':
       if (msg.payload && typeof msg.payload.seconds === 'number') {
-        (window as any).seekVideo?.(msg.payload.seconds);
+        (window as any).seekVideo?.(msg.payload.seconds, true);
         broadcastTVState();
       }
       break;
@@ -714,9 +804,43 @@ export function submitRemoteProviderConfig(): void {
       showAppAlert('Please enter a valid Xtream Server Host URL', { title: 'Configuration Required', type: 'warning' });
       return;
     }
-    payload.host = host;
-    payload.username = user;
-    payload.password = pass;
+    const parsed = parseXtreamInput(host, user, pass);
+    payload.host = parsed.host || host;
+    payload.username = parsed.username || user;
+    payload.password = parsed.password || pass;
+
+    // Immediately load locally on mobile remote client as well
+    if (state.isRemoteClient && parsed.host) {
+      QuantumSessionStore.saveSession({
+        providerType: 'xtream',
+        xtreamHost: parsed.host,
+        xtreamUser: parsed.username,
+        xtreamPass: parsed.password
+      });
+      state.lastXtreamHost = parsed.host;
+      state.lastXtreamUser = parsed.username;
+      state.lastXtreamPass = parsed.password;
+
+      if (statusEl) {
+        statusEl.textContent = '⏳ Loading Xtream streams on Remote and TV...';
+        statusEl.classList.remove('hidden');
+      }
+
+      xtreamConnector
+        .fetchXtreamPlaylist(parsed.host, parsed.username, parsed.password)
+        .then(count => {
+          QuantumSessionStore.saveChannels(state.channels);
+          (window as any).renderRemoteChannelsList?.();
+          (window as any).renderRemoteFavsList?.();
+          if (statusEl) {
+            statusEl.textContent = `✓ Synced ${count.toLocaleString()} streams! Ready to browse.`;
+            setTimeout(() => statusEl.classList.add('hidden'), 4000);
+          }
+        })
+        .catch(err => {
+          console.warn('Local remote Xtream fetch error:', err);
+        });
+    }
   } else if (currentRemoteConfigType === 'm3u') {
     const url = (document.getElementById('rem-m3u-url') as HTMLTextAreaElement | null)?.value.trim();
     if (!url) {

@@ -16,10 +16,16 @@ export class QuantumStreamEngine {
   private mediaErrorRetries = 0;
   private lastMediaErrorTime = 0;
   private isProxied = false;
+  private currentTargetUrl = '';
   private offlineCountdownTimer: any = null;
 
   constructor(videoElement: HTMLVideoElement) {
     this.video = videoElement;
+    if (this.video) {
+      this.video.poster = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23020617'/%3E%3C/svg%3E";
+      this.video.muted = false;
+      this.video.volume = 1.0;
+    }
     this.watchdog = new QuantumStreamWatchdog(
       this.video,
       () => this.hls,
@@ -132,6 +138,7 @@ export class QuantumStreamEngine {
   load(url: string, isRetry = false): void {
     if (state.isRemoteClient) return;
 
+    this.currentTargetUrl = url;
     const curCh = state.filteredChannels[state.currentChannelIndex] || null;
     if (!isRetry) {
       playbackMachine.startAttempt(curCh, url);
@@ -231,7 +238,7 @@ export class QuantumStreamEngine {
       this.isProxied = true;
       this.networkErrorRetries = 0;
       this.showSpinner(true, 'Connecting via Streaming Proxy...');
-      this.load(curCh.url, true);
+      this.load(this.currentTargetUrl || curCh.url, true);
       return;
     }
 
@@ -277,29 +284,18 @@ export class QuantumStreamEngine {
 
   attemptAutoplay(): void {
     if (!this.video || state.isRemoteClient) return;
+    this.video.muted = false;
     const playPromise = this.video.play();
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
-          const unmuteBanner = document.getElementById('unmute-banner');
-          if (unmuteBanner) unmuteBanner.classList.add('hidden');
           (window as any).updatePlayPauseIcons?.();
           (window as any).broadcastTVState?.();
         })
         .catch(() => {
-          // Browser autoplay policy blocked audio. Mute and play smoothly.
-          this.video.muted = true;
-          const btnMute = document.getElementById('btn-mute');
-          if (btnMute) {
-            btnMute.innerHTML = '<i class="fa-solid fa-volume-xmark text-xs text-red-400"></i>';
-          }
-          this.video
-            .play()
-            .then(() => {
-              const unmuteBanner = document.getElementById('unmute-banner');
-              if (unmuteBanner) unmuteBanner.classList.remove('hidden');
-            })
-            .catch(() => {});
+          // Playback paused or interrupted; retry playing unmuted without muting sound
+          this.video.muted = false;
+          this.video.play().catch(() => {});
           (window as any).updatePlayPauseIcons?.();
           (window as any).broadcastTVState?.();
         });
@@ -309,14 +305,23 @@ export class QuantumStreamEngine {
   showSpinner(show: boolean, message = 'Loading...'): void {
     const videoSpinner = document.getElementById('video-spinner');
     const spinnerMessage = document.getElementById('spinner-message');
+    const spinnerChannel = document.getElementById('spinner-channel');
     if (!videoSpinner) return;
     if (show) {
       if (spinnerMessage) spinnerMessage.textContent = message;
+      if (spinnerChannel) {
+        const cur = state.channels[state.currentChannelIndex];
+        spinnerChannel.textContent = cur ? cur.name : '';
+      }
       videoSpinner.classList.remove('hidden');
-      requestAnimationFrame(() => videoSpinner.classList.remove('opacity-0'));
+      videoSpinner.classList.remove('opacity-0');
     } else {
       videoSpinner.classList.add('opacity-0');
-      setTimeout(() => videoSpinner.classList.add('hidden'), 250);
+      setTimeout(() => {
+        if (videoSpinner.classList.contains('opacity-0')) {
+          videoSpinner.classList.add('hidden');
+        }
+      }, 250);
     }
   }
 
