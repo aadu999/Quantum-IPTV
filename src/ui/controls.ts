@@ -86,22 +86,48 @@ export function toggleFullscreenMode(forceState?: boolean): void {
   if (shouldBeFull) {
     videoStage.classList.add('theater-fullscreen');
     if (exitTheaterBtn) exitTheaterBtn.classList.remove('hidden');
+
+    try {
+      (window as any).AndroidTvNative?.setImmersiveFullscreen?.(true);
+    } catch (e) {}
+
     try {
       if (!document.fullscreenElement && videoStage.requestFullscreen) {
         videoStage.requestFullscreen().catch(() => {});
       }
     } catch (e) {}
+
     wakeControls();
+
+    // Focus on exit button or player control so D-pad works immediately
+    const btnFull = document.getElementById('btn-fullscreen');
+    if (btnFull) {
+      document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(n => n.classList.remove('tv-focused', 'tv-focused-btn'));
+      btnFull.classList.add('tv-focused-btn');
+      btnFull.focus();
+    }
   } else {
     videoStage.classList.remove('theater-fullscreen');
     videoStage.classList.remove('fullscreen-idle');
     if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
     if (exitTheaterBtn) exitTheaterBtn.classList.add('hidden');
+
+    try {
+      (window as any).AndroidTvNative?.setImmersiveFullscreen?.(false);
+    } catch (e) {}
+
     try {
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
       }
     } catch (e) {}
+
+    const btnFull = document.getElementById('btn-fullscreen');
+    if (btnFull) {
+      document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(n => n.classList.remove('tv-focused', 'tv-focused-btn'));
+      btnFull.classList.add('tv-focused-btn');
+      btnFull.focus();
+    }
   }
   broadcastTVState();
 }

@@ -1,14 +1,8 @@
 // Android TV D-Pad Spatial Navigation & Focus Engine
-// Enables 100% remote-controlled TV experience with directional keys, D-Pad, OK, Back, and Media controls
+// Enables universal remote-controlled TV experience with directional keys, D-Pad, OK, Back, and Media controls.
+// All 4 D-Pad buttons (Up, Down, Left, Right) navigate across ANY and ALL buttons on the app.
 
 import { state } from '../state/store';
-
-type FocusZone = 'channels' | 'player' | 'header' | 'modal';
-
-let currentFocusZone: FocusZone = 'channels';
-let currentFocusIndex = -1;
-let currentHeaderIndex = 0;
-let currentPlayerIndex = 1; // Default to play/pause
 
 let channelNumberBuffer = '';
 let channelNumberTimeout: any = null;
@@ -33,23 +27,23 @@ export function initTvNavigation(): void {
     style.id = 'tv-navigation-styles';
     style.textContent = `
       .tv-focused {
-        outline: 3px solid #818cf8 !important;
+        outline: 3.5px solid #818cf8 !important;
         outline-offset: 2px !important;
-        box-shadow: 0 0 25px rgba(99, 102, 241, 0.85), 0 0 10px rgba(6, 182, 212, 0.6) !important;
+        box-shadow: 0 0 25px rgba(99, 102, 241, 0.9), 0 0 10px rgba(6, 182, 212, 0.7) !important;
         transform: scale(1.025) !important;
         transition: transform 0.12s ease, box-shadow 0.12s ease, outline 0.12s ease !important;
-        z-index: 25 !important;
+        z-index: 35 !important;
       }
       .tv-focused-btn {
-        outline: 2.5px solid #38bdf8 !important;
+        outline: 3px solid #38bdf8 !important;
         outline-offset: 2px !important;
-        box-shadow: 0 0 20px rgba(56, 189, 248, 0.8) !important;
-        transform: scale(1.06) !important;
+        box-shadow: 0 0 22px rgba(56, 189, 248, 0.9), 0 0 8px rgba(99, 102, 241, 0.8) !important;
+        transform: scale(1.08) !important;
         transition: transform 0.12s ease, box-shadow 0.12s ease, outline 0.12s ease !important;
-        z-index: 25 !important;
+        z-index: 45 !important;
       }
       #tv-channel-number-hud {
-        transition: opacity 0.25s ease, transform 0.25s ease;
+        transition: opacity 0.2s ease, transform 0.2s ease;
       }
     `;
     document.head.appendChild(style);
@@ -58,13 +52,21 @@ export function initTvNavigation(): void {
   // Handle global TV remote keydown events
   window.addEventListener('keydown', handleTvKeyDown, { capture: true });
 
+  // Add double-click / double-tap to toggle fullscreen on video stage
+  const videoStage = document.getElementById('video-stage');
+  if (videoStage) {
+    videoStage.addEventListener('dblclick', () => {
+      (window as any).toggleFullscreenMode?.();
+    });
+  }
+
   // Expose global TV navigation handlers for Android native bridge (MainActivity.java)
   registerGlobalTvHandlers();
 
   // Initial focus placement after channels render
   setTimeout(() => {
-    focusFirstAvailableChannel();
-  }, 1200);
+    focusFirstInteractiveElement();
+  }, 1000);
 }
 
 function registerGlobalTvHandlers(): void {
@@ -89,22 +91,16 @@ export function handleAndroidTvBack(): boolean {
     return true;
   }
 
-  // 3. If search has text, clear search
+  // 3. If search has text or is focused, clear search
   const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
   if (searchInput && searchInput.value.trim().length > 0) {
     searchInput.value = '';
     (window as any).clearTvSearch?.();
-    focusFirstAvailableChannel();
+    focusFirstInteractiveElement();
     return true;
   }
 
-  // 4. If in header or player focus zone, return focus to channel list
-  if (currentFocusZone !== 'channels') {
-    focusFirstAvailableChannel();
-    return true;
-  }
-
-  // 5. Already on root channel list -> return false to trigger double-tap exit toast in MainActivity
+  // 4. Return false so native double-tap exit toast handles it
   return false;
 }
 
@@ -120,9 +116,10 @@ export function toggleTvGuide(): void {
   const epgView = document.getElementById('view-epg');
   if (epgView && !epgView.classList.contains('hidden')) {
     tabChannels?.click();
-    focusFirstAvailableChannel();
+    focusFirstInteractiveElement();
   } else {
     tabEpg?.click();
+    if (tabEpg) focusElement(tabEpg);
   }
 }
 
@@ -154,16 +151,16 @@ export function handleTvColorButton(color: string): void {
       }
       break;
     case 'green':
-      // Toggle EPG Guide
-      toggleTvGuide();
+      // Green button: Open Quant Remote (QR code pairing modal)!
+      (window as any).openRemoteModal?.();
       break;
     case 'yellow':
       // Quick Tune Asianet News
       (window as any).tuneToAsianetNews?.();
       break;
     case 'blue':
-      // Smart Discovery Surprise Me
-      (window as any).triggerSurpriseChannel?.();
+      // Blue button: Shortcut to toggle Fullscreen Mode!
+      (window as any).toggleFullscreenMode?.();
       break;
   }
 }
@@ -217,100 +214,300 @@ function getVisibleModal(): HTMLElement | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// 2D Spatial Navigation Core: Navigates cleanly between ANY and ALL buttons!
+// ---------------------------------------------------------------------------
+
+type Direction = 'up' | 'down' | 'left' | 'right';
+
+function getFocusableElements(): HTMLElement[] {
+  const modal = getVisibleModal();
+  const root: ParentNode = modal || document.body;
+
+  const selector = [
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    '[data-channel-id]',
+    '[onclick*="playChannel"]',
+    'a[href]',
+    '[tabindex="0"]'
+  ].join(', ');
+
+  const nodes = Array.from(root.querySelectorAll<HTMLElement>(selector));
+
+  return nodes.filter(el => {
+    if (el.classList.contains('hidden') || el.closest('.hidden')) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    return true;
+  });
+}
+
+function getCurrentFocusedElement(): HTMLElement | null {
+  const activeModal = getVisibleModal();
+  if (activeModal) {
+    const inside = activeModal.querySelector('.tv-focused, .tv-focused-btn') as HTMLElement | null;
+    if (inside) return inside;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && activeModal.contains(active)) return active;
+    return null;
+  }
+
+  const existing = document.querySelector('.tv-focused, .tv-focused-btn') as HTMLElement | null;
+  if (existing && !existing.closest('.hidden')) return existing;
+
+  const active = document.activeElement as HTMLElement | null;
+  if (active && active !== document.body && active !== document.documentElement && !active.closest('.hidden')) {
+    return active;
+  }
+
+  return null;
+}
+
+export function focusElement(el: HTMLElement): void {
+  document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(node => {
+    node.classList.remove('tv-focused', 'tv-focused-btn');
+  });
+
+  const isCard = el.hasAttribute('data-channel-id') || el.hasAttribute('data-vod-id');
+  if (isCard) {
+    el.classList.add('tv-focused');
+  } else {
+    el.classList.add('tv-focused-btn');
+  }
+
+  el.focus();
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+
+  if (state.isTheaterFullscreen) {
+    (window as any).wakeControls?.();
+  }
+}
+
+export function focusFirstInteractiveElement(): void {
+  const candidates = getFocusableElements();
+  if (candidates.length === 0) return;
+
+  // Prefer the currently playing channel card, or first channel card, or first button
+  const currentCard = candidates.find(el => el.classList.contains('bg-brand-950/60') || el.hasAttribute('data-channel-id'));
+  if (currentCard) {
+    focusElement(currentCard);
+    return;
+  }
+
+  focusElement(candidates[0]);
+}
+
+function navigateSpatial(dir: Direction): void {
+  // If in fullscreen, ensure controls are visible when user presses D-pad
+  if (state.isTheaterFullscreen) {
+    (window as any).wakeControls?.();
+  }
+
+  const current = getCurrentFocusedElement();
+  const candidates = getFocusableElements();
+
+  if (!current) {
+    focusFirstInteractiveElement();
+    return;
+  }
+
+  const cRect = current.getBoundingClientRect();
+  const cCenter = { x: cRect.left + cRect.width / 2, y: cRect.top + cRect.height / 2 };
+
+  let bestElement: HTMLElement | null = null;
+  let bestScore = Infinity;
+
+  for (const target of candidates) {
+    if (target === current || target.contains(current) || current.contains(target)) continue;
+
+    const tRect = target.getBoundingClientRect();
+    const tCenter = { x: tRect.left + tRect.width / 2, y: tRect.top + tRect.height / 2 };
+
+    let isDirectionValid = false;
+    let primaryDist = 0;
+    let orthogonalDist = 0;
+    let overlap = 0;
+    let overlapBonus = 0;
+
+    switch (dir) {
+      case 'down':
+        if (tCenter.y > cCenter.y + 4 || (tRect.top >= cRect.top + 4 && tRect.bottom > cRect.bottom)) {
+          isDirectionValid = true;
+          primaryDist = Math.max(0, tRect.top - cRect.bottom);
+          if (primaryDist === 0) primaryDist = Math.max(0, tCenter.y - cCenter.y);
+          orthogonalDist = Math.abs(tCenter.x - cCenter.x);
+          overlap = Math.max(0, Math.min(cRect.right, tRect.right) - Math.max(cRect.left, tRect.left));
+          overlapBonus = overlap > 0 ? (overlap / Math.min(cRect.width, tRect.width)) * 50 : 0;
+        }
+        break;
+
+      case 'up':
+        if (tCenter.y < cCenter.y - 4 || (tRect.bottom <= cRect.bottom - 4 && tRect.top < cRect.top)) {
+          isDirectionValid = true;
+          primaryDist = Math.max(0, cRect.top - tRect.bottom);
+          if (primaryDist === 0) primaryDist = Math.max(0, cCenter.y - tCenter.y);
+          orthogonalDist = Math.abs(tCenter.x - cCenter.x);
+          overlap = Math.max(0, Math.min(cRect.right, tRect.right) - Math.max(cRect.left, tRect.left));
+          overlapBonus = overlap > 0 ? (overlap / Math.min(cRect.width, tRect.width)) * 50 : 0;
+        }
+        break;
+
+      case 'right':
+        if (tCenter.x > cCenter.x + 4 || (tRect.left >= cRect.left + 4 && tRect.right > cRect.right)) {
+          isDirectionValid = true;
+          primaryDist = Math.max(0, tRect.left - cRect.right);
+          if (primaryDist === 0) primaryDist = Math.max(0, tCenter.x - cCenter.x);
+          orthogonalDist = Math.abs(tCenter.y - cCenter.y);
+          overlap = Math.max(0, Math.min(cRect.bottom, tRect.bottom) - Math.max(cRect.top, tRect.top));
+          overlapBonus = overlap > 0 ? (overlap / Math.min(cRect.height, tRect.height)) * 50 : 0;
+        }
+        break;
+
+      case 'left':
+        if (tCenter.x < cCenter.x - 4 || (tRect.right <= cRect.right - 4 && tRect.left < cRect.left)) {
+          isDirectionValid = true;
+          primaryDist = Math.max(0, cRect.left - tRect.right);
+          if (primaryDist === 0) primaryDist = Math.max(0, cCenter.x - tCenter.x);
+          orthogonalDist = Math.abs(tCenter.y - cCenter.y);
+          overlap = Math.max(0, Math.min(cRect.bottom, tRect.bottom) - Math.max(cRect.top, tRect.top));
+          overlapBonus = overlap > 0 ? (overlap / Math.min(cRect.height, tRect.height)) * 50 : 0;
+        }
+        break;
+    }
+
+    if (isDirectionValid) {
+      // Prioritize elements with lower primary distance and heavy orthogonal alignment penalty
+      const score = primaryDist * 1.0 + orthogonalDist * 2.2 - overlapBonus;
+      if (score < bestScore) {
+        bestScore = score;
+        bestElement = target;
+      }
+    }
+  }
+
+  if (bestElement) {
+    focusElement(bestElement);
+  } else {
+    // If no candidate found in this direction, check if current element is inside a scrollable container
+    const scrollContainer = findScrollableParent(current);
+    if (scrollContainer) {
+      if (dir === 'down') {
+        scrollContainer.scrollBy({ top: 180, behavior: 'smooth' });
+        setTimeout(() => retryFocusAfterScroll(dir, current), 150);
+      } else if (dir === 'up') {
+        scrollContainer.scrollBy({ top: -180, behavior: 'smooth' });
+        setTimeout(() => retryFocusAfterScroll(dir, current), 150);
+      }
+    }
+  }
+}
+
+function findScrollableParent(el: HTMLElement): HTMLElement | null {
+  let parent = el.parentElement;
+  while (parent && parent !== document.body) {
+    const overflowY = window.getComputedStyle(parent).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') {
+      if (parent.scrollHeight > parent.clientHeight) {
+        return parent;
+      }
+    }
+    parent = parent.parentElement;
+  }
+  return null;
+}
+
+function retryFocusAfterScroll(dir: Direction, previousEl: HTMLElement): void {
+  const candidates = getFocusableElements();
+  const cRect = previousEl.getBoundingClientRect();
+  const cCenter = { x: cRect.left + cRect.width / 2, y: cRect.top + cRect.height / 2 };
+
+  let bestElement: HTMLElement | null = null;
+  let bestScore = Infinity;
+
+  for (const target of candidates) {
+    if (target === previousEl) continue;
+    const tRect = target.getBoundingClientRect();
+    const tCenter = { x: tRect.left + tRect.width / 2, y: tRect.top + tRect.height / 2 };
+
+    if (dir === 'down' && tCenter.y > cCenter.y) {
+      const score = (tCenter.y - cCenter.y) + Math.abs(tCenter.x - cCenter.x) * 2;
+      if (score < bestScore) {
+        bestScore = score;
+        bestElement = target;
+      }
+    } else if (dir === 'up' && tCenter.y < cCenter.y) {
+      const score = (cCenter.y - tCenter.y) + Math.abs(tCenter.x - cCenter.x) * 2;
+      if (score < bestScore) {
+        bestScore = score;
+        bestElement = target;
+      }
+    }
+  }
+
+  if (bestElement) {
+    focusElement(bestElement);
+  }
+}
+
 function handleTvKeyDown(e: KeyboardEvent): void {
-  // If user is actively typing in an input field, let standard typing work
+  // If user is actively typing text in an input field (search), let standard typing work
   if (e.target instanceof HTMLInputElement && !['ArrowUp', 'ArrowDown', 'Escape', 'Enter'].includes(e.key)) {
     return;
   }
 
-  // Numeric dialing from remote
+  // Number keys (0-9) for direct channel dialing
   if (e.key >= '0' && e.key <= '9' && !(e.target instanceof HTMLInputElement)) {
     e.preventDefault();
     handleTvDigitKey(parseInt(e.key, 10));
     return;
   }
 
-  const activeModal = getVisibleModal();
-  if (activeModal) {
-    handleModalNavigation(e, activeModal);
-    return;
-  }
-
-  // Fullscreen / Theater TV controls
-  if (state.isTheaterFullscreen) {
-    handleFullscreenTvKey(e);
-    return;
-  }
-
-  // TV remote keys in standard dashboard
   switch (e.key) {
+    // D-Pad Directional Navigation - Pure spatial navigation across ALL buttons!
     case 'ArrowDown':
       e.preventDefault();
-      if (currentFocusZone === 'header') {
-        focusFirstAvailableChannel();
-      } else if (currentFocusZone === 'player') {
-        cyclePlayerControl(1);
-      } else {
-        navigateChannelList(1);
-      }
+      navigateSpatial('down');
       break;
 
     case 'ArrowUp':
       e.preventDefault();
-      if (currentFocusZone === 'channels') {
-        if (currentFocusIndex === 0) {
-          focusHeaderZone();
-        } else {
-          navigateChannelList(-1);
-        }
-      } else if (currentFocusZone === 'player') {
-        cyclePlayerControl(-1);
-      }
+      navigateSpatial('up');
       break;
 
     case 'ArrowRight':
       e.preventDefault();
-      if (currentFocusZone === 'channels') {
-        focusPlayerControls();
-      } else if (currentFocusZone === 'header') {
-        navigateHeaderZone(1);
-      } else if (currentFocusZone === 'player') {
-        cyclePlayerControl(1);
-      }
+      navigateSpatial('right');
       break;
 
     case 'ArrowLeft':
       e.preventDefault();
-      if (currentFocusZone === 'player') {
-        if (currentPlayerIndex === 0 || currentPlayerIndex === 1) {
-          focusFirstAvailableChannel();
-        } else {
-          cyclePlayerControl(-1);
-        }
-      } else if (currentFocusZone === 'header') {
-        navigateHeaderZone(-1);
-      } else {
-        focusFirstAvailableChannel();
-      }
+      navigateSpatial('left');
       break;
 
+    // D-Pad Center / OK / Enter
     case 'Enter':
     case 'Select':
-      if (currentFocusZone === 'channels') {
+      {
         e.preventDefault();
-        const items = getChannelElements();
-        if (items[currentFocusIndex]) {
-          items[currentFocusIndex].click();
-        }
-      } else if (currentFocusZone === 'player') {
-        e.preventDefault();
-        const controls = getPlayerControlElements();
-        if (controls[currentPlayerIndex]) {
-          controls[currentPlayerIndex].click();
+        const current = getCurrentFocusedElement();
+        if (current) {
+          if (current instanceof HTMLInputElement) {
+            current.focus();
+          } else {
+            current.click();
+          }
+        } else {
+          // If no element focused, toggle play/pause or focus video
+          (window as any).togglePlayPause?.();
         }
       }
       break;
 
+    // Back button
     case 'Back':
     case 'BrowserBack':
     case 'Escape':
@@ -318,6 +515,28 @@ function handleTvKeyDown(e: KeyboardEvent): void {
       handleAndroidTvBack();
       break;
 
+    // Direct Fullscreen toggle shortcuts (Key F or Info)
+    case 'KeyF':
+    case 'f':
+    case 'F':
+      e.preventDefault();
+      (window as any).toggleFullscreenMode?.();
+      break;
+
+    // Direct Quant Remote toggle shortcuts (Key R or Key M or Menu)
+    case 'KeyR':
+    case 'r':
+    case 'R':
+    case 'KeyM':
+    case 'm':
+    case 'M':
+      if (!(e.target instanceof HTMLInputElement)) {
+        e.preventDefault();
+        (window as any).openRemoteModal?.();
+      }
+      break;
+
+    // Channel Up / Down hardware keys
     case 'ChannelUp':
       e.preventDefault();
       (window as any).playNextWorkingChannel?.();
@@ -328,6 +547,7 @@ function handleTvKeyDown(e: KeyboardEvent): void {
       playPreviousChannel();
       break;
 
+    // Media hardware keys
     case 'MediaPlayPause':
       e.preventDefault();
       (window as any).togglePlayPause?.();
@@ -353,197 +573,4 @@ function handleTvKeyDown(e: KeyboardEvent): void {
       (window as any).seekVideo?.(-10);
       break;
   }
-}
-
-function handleFullscreenTvKey(e: KeyboardEvent): void {
-  const video = document.getElementById('video-player') as HTMLVideoElement | null;
-
-  switch (e.key) {
-    case 'ArrowUp':
-      e.preventDefault();
-      if (video) {
-        video.volume = Math.min(1, Math.round((video.volume + 0.05) * 100) / 100);
-        (window as any).showTvVolumeHud?.(video.volume, video.muted);
-      }
-      (window as any).wakeControls?.();
-      break;
-
-    case 'ArrowDown':
-      e.preventDefault();
-      if (video) {
-        video.volume = Math.max(0, Math.round((video.volume - 0.05) * 100) / 100);
-        (window as any).showTvVolumeHud?.(video.volume, video.muted);
-      }
-      (window as any).wakeControls?.();
-      break;
-
-    case 'ArrowLeft':
-      e.preventDefault();
-      (window as any).seekVideo?.(-10);
-      (window as any).wakeControls?.();
-      break;
-
-    case 'ArrowRight':
-      e.preventDefault();
-      (window as any).seekVideo?.(10);
-      (window as any).wakeControls?.();
-      break;
-
-    case 'Enter':
-    case 'Select':
-      e.preventDefault();
-      (window as any).togglePlayPause?.();
-      (window as any).wakeControls?.();
-      break;
-
-    case 'Back':
-    case 'BrowserBack':
-    case 'Escape':
-      e.preventDefault();
-      (window as any).toggleFullscreenMode?.(false);
-      break;
-  }
-}
-
-function handleModalNavigation(e: KeyboardEvent, modal: HTMLElement): void {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    e.preventDefault();
-    const buttons = Array.from(modal.querySelectorAll('button:not([disabled]), input:not([disabled])')) as HTMLElement[];
-    if (buttons.length === 0) return;
-
-    const currentIndex = buttons.indexOf(document.activeElement as HTMLElement);
-    let nextIndex = 0;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      nextIndex = (currentIndex + 1) % buttons.length;
-    } else {
-      nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
-    }
-    buttons[nextIndex]?.focus();
-    highlightElement(buttons[nextIndex], 'tv-focused-btn');
-  } else if (e.key === 'Back' || e.key === 'BrowserBack' || e.key === 'Escape') {
-    e.preventDefault();
-    (window as any).closeModals?.();
-  }
-}
-
-function getChannelElements(): HTMLElement[] {
-  const container = document.getElementById('view-channels');
-  if (!container) return [];
-  return Array.from(container.querySelectorAll('[data-channel-id], [onclick*="playChannel"]')) as HTMLElement[];
-}
-
-export function focusFirstAvailableChannel(): void {
-  currentFocusZone = 'channels';
-  const items = getChannelElements();
-  if (items.length > 0) {
-    currentFocusIndex = Math.max(0, Math.min(items.length - 1, state.currentChannelIndex >= 0 ? state.currentChannelIndex : 0));
-    setChannelFocus(items[currentFocusIndex]);
-  }
-}
-
-export function navigateChannelList(direction: number): void {
-  currentFocusZone = 'channels';
-  const items = getChannelElements();
-  if (items.length === 0) return;
-
-  currentFocusIndex = Math.max(0, Math.min(items.length - 1, currentFocusIndex + direction));
-  const target = items[currentFocusIndex];
-  if (target) {
-    setChannelFocus(target);
-  }
-}
-
-function setChannelFocus(el: HTMLElement): void {
-  document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(node => {
-    node.classList.remove('tv-focused', 'tv-focused-btn');
-  });
-  el.classList.add('tv-focused');
-  el.focus();
-  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function getHeaderElements(): HTMLElement[] {
-  const ids = [
-    'search-input',
-    'tab-btn-channels',
-    'tab-btn-epg',
-    'tab-btn-favs',
-    'btn-quick-asianet',
-    'btn-header-surprise',
-    'btn-open-m3u-modal',
-    'btn-open-remote-modal',
-    'btn-header-fullscreen'
-  ];
-  return ids
-    .map(id => document.getElementById(id))
-    .filter((el): el is HTMLElement => el !== null && !el.classList.contains('hidden'));
-}
-
-function focusHeaderZone(): void {
-  currentFocusZone = 'header';
-  const elements = getHeaderElements();
-  if (elements.length > 0) {
-    currentHeaderIndex = 0;
-    highlightHeaderElement(elements[0]);
-  }
-}
-
-function navigateHeaderZone(direction: number): void {
-  const elements = getHeaderElements();
-  if (elements.length === 0) return;
-  currentHeaderIndex = (currentHeaderIndex + direction + elements.length) % elements.length;
-  highlightHeaderElement(elements[currentHeaderIndex]);
-}
-
-function highlightHeaderElement(el: HTMLElement): void {
-  document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(node => {
-    node.classList.remove('tv-focused', 'tv-focused-btn');
-  });
-  el.classList.add('tv-focused-btn');
-  el.focus();
-}
-
-function getPlayerControlElements(): HTMLElement[] {
-  const ids = [
-    'btn-rewind',
-    'btn-play-pause',
-    'btn-forward',
-    'btn-audio-tracks',
-    'btn-aspect',
-    'btn-fullscreen'
-  ];
-  return ids
-    .map(id => document.getElementById(id))
-    .filter((el): el is HTMLElement => el !== null && !el.classList.contains('hidden'));
-}
-
-function focusPlayerControls(): void {
-  currentFocusZone = 'player';
-  const controls = getPlayerControlElements();
-  if (controls.length > 0) {
-    currentPlayerIndex = 1; // Play/Pause button
-    const target = controls[currentPlayerIndex] || controls[0];
-    highlightPlayerElement(target);
-  }
-}
-
-function cyclePlayerControl(direction: number): void {
-  const controls = getPlayerControlElements();
-  if (controls.length === 0) return;
-  currentPlayerIndex = (currentPlayerIndex + direction + controls.length) % controls.length;
-  highlightPlayerElement(controls[currentPlayerIndex]);
-}
-
-function highlightPlayerElement(el: HTMLElement): void {
-  document.querySelectorAll('.tv-focused, .tv-focused-btn').forEach(node => {
-    node.classList.remove('tv-focused', 'tv-focused-btn');
-  });
-  el.classList.add('tv-focused-btn');
-  el.focus();
-  (window as any).wakeControls?.();
-}
-
-function highlightElement(el: HTMLElement, focusClass: string): void {
-  document.querySelectorAll(`.${focusClass}`).forEach(node => node.classList.remove(focusClass));
-  el.classList.add(focusClass);
 }

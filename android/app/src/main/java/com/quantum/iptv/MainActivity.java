@@ -3,6 +3,7 @@ package com.quantum.iptv;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -42,6 +43,27 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void showToast(String message) {
             runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+        }
+
+        @JavascriptInterface
+        public void setImmersiveFullscreen(boolean enabled) {
+            runOnUiThread(() -> {
+                if (enabled) {
+                    getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    );
+                } else {
+                    getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_VISIBLE
+                    );
+                }
+            });
         }
     }
 
@@ -121,9 +143,19 @@ public class MainActivity extends BridgeActivity {
                         webView.evaluateJavascript("window.seekVideo && window.seekVideo(-10);", null);
                         return true;
 
-                    case KeyEvent.KEYCODE_GUIDE:
                     case KeyEvent.KEYCODE_MENU:
+                        // Dedicated remote MENU button: Immediately opens Quant Remote (QR code pairing modal)
+                        webView.evaluateJavascript("window.openRemoteModal && window.openRemoteModal();", null);
+                        return true;
+
                     case KeyEvent.KEYCODE_INFO:
+                    case 171: // KEYCODE_WINDOW
+                    case 178: // KEYCODE_TV_INPUT
+                        // Dedicated remote INFO or WINDOW button: Immediately toggles Fullscreen Mode
+                        webView.evaluateJavascript("window.toggleFullscreenMode && window.toggleFullscreenMode();", null);
+                        return true;
+
+                    case KeyEvent.KEYCODE_GUIDE:
                         webView.evaluateJavascript("window.toggleTvGuide && window.toggleTvGuide();", null);
                         return true;
 
@@ -132,7 +164,8 @@ public class MainActivity extends BridgeActivity {
                         return true;
 
                     case KeyEvent.KEYCODE_PROG_GREEN:
-                        webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('green');", null);
+                        // Green button: Shortcut to open Quant Remote QR code!
+                        webView.evaluateJavascript("window.openRemoteModal && window.openRemoteModal();", null);
                         return true;
 
                     case KeyEvent.KEYCODE_PROG_YELLOW:
@@ -140,7 +173,8 @@ public class MainActivity extends BridgeActivity {
                         return true;
 
                     case KeyEvent.KEYCODE_PROG_BLUE:
-                        webView.evaluateJavascript("window.handleTvColorButton && window.handleTvColorButton('blue');", null);
+                        // Blue button: Shortcut to toggle Fullscreen Mode!
+                        webView.evaluateJavascript("window.toggleFullscreenMode && window.toggleFullscreenMode();", null);
                         return true;
                 }
 
