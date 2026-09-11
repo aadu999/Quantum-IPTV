@@ -738,20 +738,15 @@ export function initApp(): void {
     updateSessionBannerUI(savedSession);
   }
 
-  // 2. Restore saved channels bundle if available
-  const savedChannels = QuantumSessionStore.loadChannels();
-  if (savedChannels && Array.isArray(savedChannels) && savedChannels.length > 0) {
-    const sanitized = savedChannels.map(ch => sanitizeChannel(ch));
-    state.channels = sanitized;
+  // 2. Restore instant micro-bootstrap channels (< 50 items for sub-5ms boot)
+  const savedBootstrap = QuantumSessionStore.loadChannels();
+  if (savedBootstrap && Array.isArray(savedBootstrap) && savedBootstrap.length > 0) {
+    state.channels = savedBootstrap.map(ch => sanitizeChannel(ch));
   } else {
-    const cached = QuantumOfflineCache.loadBundle();
-    if (cached && cached.channels && cached.channels.length > 0) {
-      const sanitized = cached.channels.map((ch: any) => sanitizeChannel(ch));
-      state.channels = sanitized;
-    }
+    state.channels = [...DEFAULT_PRESET_CHANNELS];
   }
 
-  // Always ensure default preset Live channels are merged in
+  // Always ensure default preset Live channels are present
   DEFAULT_PRESET_CHANNELS.forEach(preset => {
     if (!state.channels.some(c => c.id === preset.id || (c.url && c.url === preset.url))) {
       state.channels.push(preset);
@@ -759,22 +754,38 @@ export function initApp(): void {
   });
   state.filteredChannels = [...state.channels];
 
-  // Asynchronously hydrate complete catalog from IndexedDB (offline-first)
-  QuantumOfflineCache.loadAllChannels().then(idbChannels => {
-    if (idbChannels && idbChannels.length > 0) {
-      let added = 0;
-      idbChannels.forEach(c => {
-        if (!state.channels.some(existing => existing.id === c.id || (existing.url && existing.url === c.url))) {
-          state.channels.push(sanitizeChannel(c));
-          added++;
+  // 3. Asynchronously hydrate complete catalog from IndexedDB (offline-first, non-blocking)
+  setTimeout(() => {
+    QuantumOfflineCache.loadAllChannels().then(idbChannels => {
+      if (idbChannels && idbChannels.length > 0) {
+        const existingIds = new Set(state.channels.map(c => c.id));
+        const existingUrls = new Set(state.channels.map(c => c.url).filter(Boolean));
+        let added = 0;
+
+        for (let i = 0; i < idbChannels.length; i++) {
+          const c = idbChannels[i];
+          if (!existingIds.has(c.id) && (!c.url || !existingUrls.has(c.url))) {
+            state.channels.push(sanitizeChannel(c));
+            existingIds.add(c.id);
+            if (c.url) existingUrls.add(c.url);
+            added++;
+          }
         }
-      });
-      if (added > 0) {
-        updateLanguageDropdown();
-        filterChannels();
+
+        if (added > 0) {
+          console.log(`[QuantumIndexedDB] Hydrated ${added} items from IndexedDB`);
+          updateLanguageDropdown();
+          const curCh = state.filteredChannels[state.currentChannelIndex];
+          filterChannels();
+          if (curCh) {
+            const preservedIdx = state.filteredChannels.findIndex(c => c.id === curCh.id);
+            if (preservedIdx !== -1) state.currentChannelIndex = preservedIdx;
+          }
+          renderChannelList();
+        }
       }
-    }
-  }).catch(() => {});
+    }).catch(err => console.warn('[QuantumIndexedDB] Hydration warning:', err));
+  }, 100);
 
   checkAndLaunchRemoteView();
   if (state.isRemoteClient) {
@@ -805,7 +816,7 @@ export function initApp(): void {
     updateFavoritesUI();
     adjustMobileVideoStage();
 
-    // 2. Play initial Malayalam Live TV channel
+    // 2. Play initial Malayalam Live TV channel immediately
     let initialIndex = 0;
     const firstMalLive = state.filteredChannels.findIndex(c =>
       (c.type !== 'series' && c.type !== 'vod') &&
@@ -826,15 +837,18 @@ export function initApp(): void {
       if (!state.isRemoteClient) {
         toggleFullscreenMode(true);
       }
-    }, 400);
+    }, 300);
 
-    // 4. Smoothly dismiss boot splash once video starts or after graceful intro window
+    // 4. Smoothly dismiss boot splash once video starts or on canplay
     videoElement.addEventListener('playing', () => {
+      dismissBootSplash();
+    }, { once: true });
+    videoElement.addEventListener('canplay', () => {
       dismissBootSplash();
     }, { once: true });
     setTimeout(() => {
       dismissBootSplash();
-    }, 1400);
+    }, 800);
 
     // 4. Background re-sync for active provider session or public live channels
     const liveCount = state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId).length;

@@ -1,8 +1,10 @@
 import { Channel, SessionData } from '../types';
+import { QuantumOfflineCache } from '../services/cache';
 
 export const QuantumSessionStore = {
   KEY: 'quantum_iptv_session_v2',
-  CHANNELS_KEY: 'quantum_iptv_saved_channels_v2',
+  BOOTSTRAP_KEY: 'quantum_iptv_bootstrap_v2',
+  LEGACY_CHANNELS_KEY: 'quantum_iptv_saved_channels_v2',
 
   saveSession(data: Partial<SessionData> = {}): void {
     try {
@@ -22,14 +24,23 @@ export const QuantumSessionStore = {
   },
 
   saveChannels(channels: Channel[]): void {
-    try {
-      if (!channels || !Array.isArray(channels) || channels.length === 0) return;
-      const series = channels.filter(c => c.type === 'series' || c.seriesId || (c.url && c.url.includes('/series/')));
-      const movies = channels.filter(c => c.type === 'vod' || c.vodId || (c.url && c.url.includes('/movie/')));
-      const live = channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId);
+    if (!channels || !Array.isArray(channels) || channels.length === 0) return;
 
-      const ordered = [...series, ...movies, ...live];
-      const toSave = ordered.slice(0, 6000).map(c => ({
+    // 1. Asynchronously persist full catalog (unlimited capacity) into IndexedDB
+    QuantumOfflineCache.saveAllChannels(channels).catch(err => {
+      console.warn('[QuantumSessionStore] Failed to save to IndexedDB:', err);
+    });
+
+    // 2. Extract ultra-lightweight micro-bootstrap (top 50 priority channels) for instant cold start (< 20KB)
+    try {
+      const malayalam = channels.filter(c =>
+        (c.language && c.language.toLowerCase() === 'malayalam') ||
+        (c.name && c.name.toLowerCase().includes('malayalam')) ||
+        (c.group && c.group.toLowerCase().includes('malayalam')) ||
+        (c.name && c.name.toLowerCase().includes('asianet'))
+      );
+      const others = channels.filter(c => !malayalam.includes(c));
+      const bootstrap = [...malayalam, ...others].slice(0, 50).map(c => ({
         id: c.id,
         name: c.name,
         url: c.url,
@@ -38,37 +49,57 @@ export const QuantumSessionStore = {
         language: c.language,
         country: c.country,
         type: c.type,
-        seriesId: c.seriesId,
-        vodId: c.vodId,
-        cover: c.cover,
-        plot: c.plot,
-        rating: c.rating,
-        cast: c.cast,
-        director: c.director,
-        genre: c.genre,
-        releaseDate: c.releaseDate,
         program: c.program,
         sources: c.sources
       }));
-      localStorage.setItem(this.CHANNELS_KEY, JSON.stringify(toSave));
-    } catch (e) {}
+
+      localStorage.setItem(this.BOOTSTRAP_KEY, JSON.stringify(bootstrap));
+
+      // Purge legacy bloated multi-megabyte 6,000 channel string to eliminate main-thread freeze
+      localStorage.removeItem(this.LEGACY_CHANNELS_KEY);
+      localStorage.removeItem('quantum_iptv_offline_bundle_v2');
+    } catch (e) {
+      console.warn('[QuantumSessionStore] Bootstrap save warning:', e);
+    }
   },
 
   loadChannels(): Channel[] | null {
+    // 1. Fast path: Read ultra-lightweight micro-bootstrap (< 50 items, < 2ms parse time)
     try {
-      const raw = localStorage.getItem(this.CHANNELS_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
+      const bootstrapRaw = localStorage.getItem(this.BOOTSTRAP_KEY);
+      if (bootstrapRaw) {
+        return JSON.parse(bootstrapRaw);
+      }
+    } catch (e) {}
+
+    // 2. Migration path: Check legacy key if present, migrate to IndexedDB, then purge legacy key
+    try {
+      const legacyRaw = localStorage.getItem(this.LEGACY_CHANNELS_KEY);
+      if (legacyRaw) {
+        const parsed = JSON.parse(legacyRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Asynchronously migrate to IndexedDB
+          QuantumOfflineCache.saveAllChannels(parsed).catch(() => {});
+          // Save lightweight bootstrap
+          this.saveChannels(parsed);
+          return parsed.slice(0, 50);
+        }
+      }
+    } catch (e) {}
+
+    return null;
   },
 
   clearSession(): void {
     try {
       localStorage.removeItem(this.KEY);
-      localStorage.removeItem(this.CHANNELS_KEY);
+      localStorage.removeItem(this.BOOTSTRAP_KEY);
+      localStorage.removeItem(this.LEGACY_CHANNELS_KEY);
+      localStorage.removeItem('quantum_iptv_offline_bundle_v2');
     } catch (e) {}
   }
 };
 
-(window as any).QuantumSessionStore = QuantumSessionStore;
+if (typeof window !== 'undefined') {
+  (window as any).QuantumSessionStore = QuantumSessionStore;
+}

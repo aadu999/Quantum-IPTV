@@ -25,10 +25,17 @@ export class QuantumStreamEngine {
   constructor(videoElement: HTMLVideoElement) {
     this.video = videoElement;
     if (this.video) {
+      this.video.autoplay = true;
+      this.video.playsInline = true;
       this.video.poster = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23020617'/%3E%3C/svg%3E";
       this.video.muted = false;
       this.video.volume = 1.0;
       this.video.addEventListener('playing', () => this.onStreamPlaying());
+      this.video.addEventListener('canplay', () => {
+        if (this.video && this.video.paused) {
+          this.attemptAutoplay();
+        }
+      });
     }
     this.watchdog = new QuantumStreamWatchdog(
       this.video,
@@ -333,22 +340,52 @@ export class QuantumStreamEngine {
 
   attemptAutoplay(): void {
     if (!this.video || state.isRemoteClient) return;
-    this.video.muted = false;
-    const playPromise = this.video.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          (window as any).updatePlayPauseIcons?.();
-          (window as any).broadcastTVState?.();
-        })
-        .catch(() => {
-          // Playback paused or interrupted; retry playing unmuted without muting sound
-          this.video.muted = false;
-          this.video.play().catch(() => {});
-          (window as any).updatePlayPauseIcons?.();
-          (window as any).broadcastTVState?.();
-        });
-    }
+    this.video.playsInline = true;
+
+    const tryPlay = (muted = false) => {
+      if (!this.video) return;
+      this.video.muted = muted;
+      const playPromise = this.video.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            (window as any).updatePlayPauseIcons?.();
+            (window as any).broadcastTVState?.();
+            if (muted) {
+              // Unmute immediately on first remote keypress or pointer interaction
+              const unmuteOnInteraction = () => {
+                if (this.video) this.video.muted = false;
+                window.removeEventListener('keydown', unmuteOnInteraction);
+                window.removeEventListener('pointerdown', unmuteOnInteraction);
+              };
+              window.addEventListener('keydown', unmuteOnInteraction, { once: true });
+              window.addEventListener('pointerdown', unmuteOnInteraction, { once: true });
+            }
+          })
+          .catch((err) => {
+            console.warn('[QuantumStreamEngine] Autoplay unmuted was blocked by policy:', err?.message || err);
+            if (!muted) {
+              // Start muted instantly so video decodes and renders immediately on TV
+              tryPlay(true);
+            }
+          });
+      }
+    };
+
+    // 1. Try unmuted playback first
+    tryPlay(false);
+
+    // 2. Register kickstart listener so any remote keypress will start playback if still paused
+    const kickstart = () => {
+      if (this.video && this.video.paused) {
+        this.video.muted = false;
+        this.video.play().catch(() => {});
+      }
+      window.removeEventListener('keydown', kickstart);
+      window.removeEventListener('pointerdown', kickstart);
+    };
+    window.addEventListener('keydown', kickstart, { once: true });
+    window.addEventListener('pointerdown', kickstart, { once: true });
   }
 
   showSpinner(show: boolean, message = 'Loading...'): void {
