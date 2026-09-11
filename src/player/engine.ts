@@ -7,6 +7,9 @@ import { networkEstimator } from './network-estimator';
 import { createHlsConfig } from './hls-config';
 import { QuantumStreamWatchdog } from './watchdog';
 import { getProxiedUrl, shouldProxy } from '../services/proxy';
+import { eventBus } from '../core/event-bus';
+import { sessionManager } from '../core/session';
+import { sourceHealthTracker } from './source-health';
 
 export class QuantumStreamEngine {
   public video: HTMLVideoElement;
@@ -25,6 +28,7 @@ export class QuantumStreamEngine {
       this.video.poster = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23020617'/%3E%3C/svg%3E";
       this.video.muted = false;
       this.video.volume = 1.0;
+      this.video.addEventListener('playing', () => this.onStreamPlaying());
     }
     this.watchdog = new QuantumStreamWatchdog(
       this.video,
@@ -37,6 +41,9 @@ export class QuantumStreamEngine {
           if (durationSec >= 8) {
             this.handlePersistentStarvation();
           }
+        },
+        onFailover: (reason) => {
+          this.fallbackToNextSourceOrProxy(reason);
         }
       }
     );
@@ -53,10 +60,14 @@ export class QuantumStreamEngine {
       this.hls = new Hls(createHlsConfig());
       this.hls.attachMedia(this.video);
 
-      this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      this.hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
         this.showSpinner(false);
         this.attemptAutoplay();
         this.updateHudResolution();
+        eventBus.emit('MANIFEST_PARSED', {
+          url: this.currentTargetUrl,
+          levels: data?.levels?.length || 0
+        });
       });
 
       this.hls.on(Hls.Events.LEVEL_SWITCHED, () => {
@@ -64,12 +75,18 @@ export class QuantumStreamEngine {
       });
 
       this.hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+        sourceHealthTracker.recordFragment(this.currentTargetUrl, true);
         if (data && data.frag && data.frag.stats) {
           const stats = data.frag.stats;
           const loadDuration = stats.loading.end - stats.loading.start;
           const bytes = stats.loaded || stats.total || 0;
           if (loadDuration > 0 && bytes > 0) {
             networkEstimator.recordSample(bytes, loadDuration);
+            eventBus.emit('FRAG_LOADED', {
+              bytes,
+              durationMs: loadDuration,
+              url: this.currentTargetUrl
+            });
           }
         }
       });
@@ -90,6 +107,8 @@ export class QuantumStreamEngine {
 
     console.warn('[QuantumStreamEngine] Fatal HLS error encountered:', data.type, data.details);
     playbackMachine.transition('ERROR', { type: data.type, details: data.details });
+    sourceHealthTracker.recordFragment(this.currentTargetUrl, false);
+    eventBus.emit('BUFFER_LOW', { type: data.type, details: data.details, url: this.currentTargetUrl });
 
     switch (data.type) {
       case Hls.ErrorTypes.NETWORK_ERROR:
@@ -141,6 +160,15 @@ export class QuantumStreamEngine {
     this.currentTargetUrl = url;
     const curCh = state.filteredChannels[state.currentChannelIndex] || null;
     if (!isRetry) {
+      if (!sessionManager.getActiveSession() || (curCh && sessionManager.getActiveSession()?.contentId !== curCh.id)) {
+        sessionManager.startSession(
+          curCh ? curCh.id : 'unknown',
+          curCh ? curCh.name : 'Unknown Channel',
+          Date.now(),
+          { estimatedBandwidth: networkEstimator.bandwidth }
+        );
+      }
+      sessionManager.recordAttempt(url, curCh ? curCh.name : undefined, this.isProxied);
       playbackMachine.startAttempt(curCh, url);
       this.networkErrorRetries = 0;
       this.mediaErrorRetries = 0;
@@ -225,6 +253,12 @@ export class QuantumStreamEngine {
         curCh.activeSourceIndex = curIndex + 1;
         const backupSource = curCh.sources[curCh.activeSourceIndex];
         console.log(`[QuantumStreamEngine] Failing over to Source ${curCh.activeSourceIndex + 1} (${backupSource.sourceName}) for ${curCh.name}`);
+        eventBus.emit('SOURCE_SWITCHED', {
+          fromUrl: curCh.url,
+          toUrl: backupSource.url,
+          sourceName: backupSource.sourceName,
+          reason
+        });
         this.showToast(`Switching to backup source (${backupSource.sourceName})...`, 'info');
         this.showSpinner(true, `Failing over to ${backupSource.sourceName}...`);
         this.load(backupSource.url, true);
@@ -237,13 +271,19 @@ export class QuantumStreamEngine {
       console.log(`[QuantumStreamEngine] Activating high-performance streaming proxy for ${curCh.name}`);
       this.isProxied = true;
       this.networkErrorRetries = 0;
+      eventBus.emit('SOURCE_SWITCHED', {
+        fromUrl: this.currentTargetUrl || curCh.url,
+        toUrl: getProxiedUrl(this.currentTargetUrl || curCh.url),
+        sourceName: 'Quantum Streaming Proxy',
+        reason
+      });
       this.showSpinner(true, 'Connecting via Streaming Proxy...');
       this.load(this.currentTargetUrl || curCh.url, true);
       return;
     }
 
     // 3. All sources and proxy failed
-    circuitBreaker.recordFailure(curCh.url);
+    circuitBreaker.recordFailure(curCh.url, reason);
     this.onStreamFailed(reason);
   }
 
@@ -252,9 +292,17 @@ export class QuantumStreamEngine {
     this.hideOfflineOverlay();
     this.updateHudResolution();
 
+    const ztf = sessionManager.recordFirstFrame();
+    if (ztf !== null) {
+      const ztfEl = document.getElementById('hud-ztf');
+      if (ztfEl) {
+        ztfEl.textContent = `${ztf}ms`;
+      }
+    }
+
     const curCh = state.filteredChannels[state.currentChannelIndex];
     if (curCh) {
-      circuitBreaker.recordSuccess(curCh.url);
+      circuitBreaker.recordSuccess(curCh.url, ztf || undefined);
       playbackMachine.transition('PLAYING');
       state.offlineChannels.delete(curCh.id);
     }
@@ -271,8 +319,9 @@ export class QuantumStreamEngine {
   onStreamFailed(reason = 'Playback error'): void {
     this.showSpinner(false);
     const curCh = state.filteredChannels[state.currentChannelIndex];
+    sessionManager.endSession('FAILED');
     if (curCh) {
-      circuitBreaker.recordFailure(curCh.url);
+      circuitBreaker.recordFailure(curCh.url, reason);
       playbackMachine.endAttempt('FAILED', reason);
       state.offlineChannels.add(curCh.id);
       this.showOfflineOverlay(curCh);

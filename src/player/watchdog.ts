@@ -1,28 +1,36 @@
 import Hls from 'hls.js';
-import { networkEstimator } from './network-estimator';
+import { PlaybackObserver } from './observer';
+import { StallClassifier } from './classifier';
+import { recoveryPlanner } from './recovery-planner';
+import { eventBus } from '../core/event-bus';
+import { sessionManager } from '../core/session';
 
 export interface WatchdogOptions {
   onStallRecover?: (action: string) => void;
   onStarvation?: (durationSec: number) => void;
+  onFailover?: (reason: string) => void;
 }
 
 export class QuantumStreamWatchdog {
-  private video: HTMLVideoElement;
+  private observer: PlaybackObserver;
+  private classifier: StallClassifier;
   private getHls: () => Hls | null;
+  private video: HTMLVideoElement;
   private intervalId: any = null;
-  private lastTime = 0;
-  private stallTicks = 0;
-  private starvationTicks = 0;
   private options: WatchdogOptions;
 
   constructor(video: HTMLVideoElement, getHls: () => Hls | null, options: WatchdogOptions = {}) {
     this.video = video;
     this.getHls = getHls;
     this.options = options;
+    this.observer = new PlaybackObserver(video, getHls);
+    this.classifier = new StallClassifier();
   }
 
   start(): void {
     this.stop();
+    this.observer.reset();
+    this.classifier.reset();
     this.intervalId = setInterval(() => this.tick(), 1000);
   }
 
@@ -31,112 +39,59 @@ export class QuantumStreamWatchdog {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    this.stallTicks = 0;
-    this.starvationTicks = 0;
-    this.lastTime = 0;
+    this.observer.reset();
+    this.classifier.reset();
   }
 
   private tick(): void {
-    if (!this.video || this.video.paused || this.video.seeking) {
-      this.stallTicks = 0;
-      this.starvationTicks = 0;
-      this.lastTime = this.video ? this.video.currentTime : 0;
-      this.updateHud(0, 'Paused');
+    // 1. OBSERVE: Sample pure telemetry snapshot
+    const snapshot = this.observer.sample();
+
+    // 2. DIAGNOSE: Pure classification
+    const diagnosis = this.classifier.classify(snapshot);
+
+    // Update HUD buffer display
+    this.updateHud(
+      snapshot.bufferedAhead,
+      diagnosis.type === 'PROGRESSING'
+        ? 'Optimal'
+        : diagnosis.type === 'PAUSED_OR_SEEKING'
+        ? 'Paused'
+        : diagnosis.reason
+    );
+
+    if (diagnosis.type === 'PROGRESSING' || diagnosis.type === 'PAUSED_OR_SEEKING') {
       return;
     }
 
-    const current = this.video.currentTime;
-    const timeDelta = Math.abs(current - this.lastTime);
-    this.lastTime = current;
+    // Record stall in session
+    sessionManager.recordStall(1000);
+    eventBus.emit('STALL_DETECTED', {
+      type: diagnosis.type,
+      stallTicks: diagnosis.stallTicks,
+      bufferedAhead: snapshot.bufferedAhead
+    });
 
-    // 1. Calculate buffer ahead and look for downstream MSE gaps
-    let bufferedAhead = 0;
-    let nextGapStart: number | null = null;
+    if (diagnosis.type === 'NETWORK_STARVATION' && this.options.onStarvation) {
+      this.options.onStarvation(diagnosis.starvationTicks);
+    }
 
-    if (this.video.buffered && this.video.buffered.length > 0) {
-      for (let i = 0; i < this.video.buffered.length; i++) {
-        const start = this.video.buffered.start(i);
-        const end = this.video.buffered.end(i);
-
-        if (start <= current && current <= end) {
-          bufferedAhead = end - current;
-        } else if (start > current && start - current <= 1.5) {
-          // A buffer range exists just ahead of current playhead
-          if (nextGapStart === null || start < nextGapStart) {
-            nextGapStart = start;
-          }
+    // 3. PLAN & EXECUTE: Surgical recovery
+    const recovered = recoveryPlanner.planAndExecute(diagnosis, {
+      video: this.video,
+      getHls: this.getHls,
+      onFailover: (reason) => {
+        if (this.options.onFailover) {
+          this.options.onFailover(reason);
         }
+      },
+      onStatusUpdate: (status) => {
+        this.updateHud(snapshot.bufferedAhead, status);
       }
-    }
+    });
 
-    networkEstimator.updateBufferSlope(bufferedAhead);
-
-    // 2. Playback progress detection (stalled if delta < 0.04s)
-    const isProgressing = timeDelta >= 0.04;
-
-    if (isProgressing) {
-      this.stallTicks = 0;
-      this.starvationTicks = 0;
-      this.updateHud(bufferedAhead, 'Optimal');
-      return;
-    }
-
-    // 3. Playback is stalled! Determine cause and apply surgical recovery
-    this.stallTicks++;
-
-    // Case A: Discontinuity / MSE Buffer Gap (stuck in a gap between buffered ranges)
-    if (nextGapStart !== null && nextGapStart > current) {
-      const gapSize = nextGapStart - current;
-      if (gapSize <= 1.2) {
-        console.warn(`[Watchdog] Bridging MSE timestamp gap (${gapSize.toFixed(2)}s) to ${nextGapStart.toFixed(2)}s`);
-        this.video.currentTime = nextGapStart + 0.05;
-        this.stallTicks = 0;
-        this.updateHud(bufferedAhead, 'Bridged Gap');
-        if (this.options.onStallRecover) this.options.onStallRecover('gap_bridge');
-        return;
-      }
-    }
-
-    // Case B: Decoder freeze with buffer available (readyState >= 2 but stuck for 2s)
-    if (bufferedAhead > 0.5 && this.stallTicks >= 2) {
-      console.warn('[Watchdog] Buffer available but playback stalled; nudging decoder playhead');
-      this.video.currentTime += 0.08;
-      this.video.play().catch(() => {});
-      this.stallTicks = 0;
-      this.updateHud(bufferedAhead, 'Nudged Decoder');
-      if (this.options.onStallRecover) this.options.onStallRecover('decoder_nudge');
-      return;
-    }
-
-    // Case C: Buffer starvation (no buffer ahead)
-    if (bufferedAhead < 0.3) {
-      this.starvationTicks++;
-      this.updateHud(bufferedAhead, `Buffering (${this.starvationTicks}s)`);
-
-      const hls = this.getHls();
-      // If starved for 3+ seconds, trigger HLS reload of fragments
-      if (this.starvationTicks === 3 && hls) {
-        console.warn('[Watchdog] Starvation detected; triggering hls.startLoad()');
-        hls.startLoad();
-      }
-
-      // If live stream has drifted too far behind live edge during stall, resync
-      if (this.starvationTicks >= 5 && hls && hls.liveSyncPosition) {
-        const drift = Math.abs(current - hls.liveSyncPosition);
-        if (drift > 12) {
-          console.warn(`[Watchdog] Live stream drifted ${drift.toFixed(1)}s; resyncing to live edge`);
-          this.video.currentTime = hls.liveSyncPosition - 3;
-          hls.startLoad();
-          this.starvationTicks = 0;
-          this.updateHud(bufferedAhead, 'Live Resync');
-          if (this.options.onStallRecover) this.options.onStallRecover('live_resync');
-          return;
-        }
-      }
-
-      if (this.options.onStarvation) {
-        this.options.onStarvation(this.starvationTicks);
-      }
+    if (recovered && this.options.onStallRecover) {
+      this.options.onStallRecover(diagnosis.recommendedAction);
     }
   }
 

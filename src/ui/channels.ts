@@ -7,6 +7,7 @@ import { broadcastTVState, sendRemoteCmd } from '../services/remote';
 import { xtreamConnector, getXtreamCredentials } from '../services/xtream';
 import { inferChannelLanguage } from '../services/m3u';
 import { QuantumStreamEngine } from '../player/engine';
+import { sessionManager } from '../core/session';
 
 let engineInstance: QuantumStreamEngine | null = null;
 
@@ -53,10 +54,14 @@ export function playChannel(index: number, options: { directPlay?: boolean } = {
   const currentChName = document.getElementById('current-ch-name');
   const currentChLogo = document.getElementById('current-ch-logo') as HTMLImageElement | null;
   const currentChEpg = document.getElementById('current-ch-epg');
+  const hudZtf = document.getElementById('hud-ztf');
+  if (hudZtf) hudZtf.textContent = '...';
 
   if (currentChName) currentChName.textContent = channel.name;
   if (currentChLogo) currentChLogo.src = channel.logo || FALLBACK_LOGO;
   if (currentChEpg) currentChEpg.textContent = channel.program || channel.group || 'Live Stream';
+
+  sessionManager.startSession(channel.id, channel.name, Date.now());
 
   userProfile.recordWatchEvent(channel, 5);
   QuantumSessionStore.saveSession({

@@ -1,4 +1,5 @@
 import { CircuitBreakerHostInfo } from '../types';
+import { sourceHealthTracker } from './source-health';
 
 export class QuantumCircuitBreaker {
   public hosts: Map<string, CircuitBreakerHostInfo>;
@@ -12,34 +13,24 @@ export class QuantumCircuitBreaker {
   }
 
   getHost(url: string): string {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return url;
-    }
+    return sourceHealthTracker.getHostKey(url);
+  }
+
+  getEndpoint(url: string): string {
+    return sourceHealthTracker.getEndpointKey(url);
   }
 
   isAvailable(url: string): boolean {
-    const host = this.getHost(url);
-    const info = this.hosts.get(host);
-    if (!info) return true;
-
-    if (info.state === 'OPEN') {
-      if (Date.now() > info.nextAttempt) {
-        info.state = 'HALF_OPEN';
-        return true;
-      }
-      return false;
-    }
-    return true;
+    return sourceHealthTracker.isAvailable(url);
   }
 
-  recordSuccess(url: string): void {
+  recordSuccess(url: string, startupTimeMs?: number): void {
     const host = this.getHost(url);
     this.hosts.set(host, { state: 'CLOSED', failures: 0, nextAttempt: 0 });
+    sourceHealthTracker.recordSuccess(url, startupTimeMs);
   }
 
-  recordFailure(url: string): void {
+  recordFailure(url: string, reason?: string): void {
     const host = this.getHost(url);
     const info = this.hosts.get(host) || { state: 'CLOSED', failures: 0, nextAttempt: 0 };
     info.failures += 1;
@@ -49,17 +40,26 @@ export class QuantumCircuitBreaker {
       info.nextAttempt = Date.now() + this.cooldownMs;
     }
     this.hosts.set(host, info);
+    sourceHealthTracker.recordFailure(url, reason);
   }
 
   reset(url?: string): void {
     if (url) {
       const host = this.getHost(url);
       this.hosts.delete(host);
+      sourceHealthTracker.reset(url);
     } else {
       this.hosts.clear();
+      sourceHealthTracker.reset();
     }
+  }
+
+  getHealthScore(url: string): number {
+    return sourceHealthTracker.calculateScore(url);
   }
 }
 
 export const circuitBreaker = new QuantumCircuitBreaker();
-(window as any).circuitBreaker = circuitBreaker;
+if (typeof window !== 'undefined') {
+  (window as any).circuitBreaker = circuitBreaker;
+}
