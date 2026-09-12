@@ -179,11 +179,19 @@ button, input, select, a, .touch-target {
     opacity: 1 !important;
   }
 
-  /* Content-type filter pills. Short labels such as "All" stay narrow without
-     an explicit minimum. */
+  /* Content-type filter pills.
+     flex-shrink:0 is load-bearing. These sit in a horizontally scrolling flex
+     row, where a flex item's default min-width:auto is what stops it shrinking
+     below its own content. Setting an explicit min-width replaces that
+     automatic minimum, so without this the pills squeezed to fit the viewport
+     and their whitespace-nowrap labels spilled out over the neighbouring pill
+     ("Favs (", "Recommende", overlapping VOD/Series/Catchup). Keeping them at
+     natural width lets the row scroll instead, which is what the container's
+     overflow-x:auto is there for. */
   [id^='pill-type-'] {
     min-height: 32px;
     min-width: 44px;
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
