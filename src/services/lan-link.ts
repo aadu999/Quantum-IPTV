@@ -95,12 +95,24 @@ export class QuantumLanLink {
       this.setStatus('failed', 'WebRTC unavailable');
       return;
     }
+
+    // Announce either way. Whichever device starts second would otherwise miss
+    // the other's opening move entirely: an offer sent before the TV was
+    // listening is simply lost, and nothing would resend it until ICE gave up
+    // thirty seconds later.
+    this.announce();
+
     if (this.role === 'remote') {
       this.createOffer().catch(err => {
         console.warn('[QuantumLanLink] Offer failed:', err?.message || err);
         this.scheduleRetry();
       });
     }
+  }
+
+  /** Tells any peer already listening that this device is here. */
+  announce(): void {
+    this.handlers.publishSignal({ kind: 'hello', from: this.sessionId, role: this.role });
   }
 
   private buildPeerConnection(): RTCPeerConnection {
@@ -184,7 +196,17 @@ export class QuantumLanLink {
     if (payload.from && payload.from === this.sessionId) return;
 
     try {
-      if (payload.kind === 'offer' && this.role === 'tv') {
+      if (payload.kind === 'hello') {
+        // A peer just came up. The TV stays passive; the remote re-offers so a
+        // TV that started after it still gets a handshake, and so a link that
+        // dropped is re-established as soon as the other side reappears.
+        if (this.role === 'remote' && payload.role === 'tv' && !this.connected) {
+          this.retries = 0;
+          await this.createOffer();
+        } else if (this.role === 'tv' && payload.role === 'remote') {
+          this.announce();
+        }
+      } else if (payload.kind === 'offer' && this.role === 'tv') {
         await this.acceptOffer(payload);
       } else if (payload.kind === 'answer' && this.role === 'remote') {
         await this.acceptAnswer(payload);

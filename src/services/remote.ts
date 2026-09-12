@@ -89,6 +89,10 @@ export function isLanLinkActive(): boolean {
   return !!lanLink?.connected;
 }
 
+function announceLanPresence(): void {
+  lanLink?.announce();
+}
+
 /**
  * Strips provider credentials from anything bound for the shared MQTT broker.
  *
@@ -160,10 +164,11 @@ export function initRemoteSync(): void {
           const chunkTopic = `quantum_tv/${state.roomId}/catalog_chunk`;
           const presenceTopic = `quantum_tv/${state.roomId}/presence`;
 
-          // Both roles listen for signalling; the link itself then negotiates
-          // the direct route and takes over from the broker.
+          // Signalling can now also travel over the broker, which is what lets
+          // two *different* devices find each other. Re-announce so a peer that
+          // came up before the broker was reachable learns about us.
           mqttClient.subscribe(rtcTopic());
-          initLanLink();
+          announceLanPresence();
 
           if (state.isRemoteClient) {
             mqttClient.subscribe(stateTopic);
@@ -228,6 +233,12 @@ export function initRemoteSync(): void {
       }
     }
   }
+
+  // Bring the direct link up immediately rather than waiting on the broker.
+  // Gating this behind the MQTT connect handler meant a slow or unreachable
+  // broker stopped the peer link from even being attempted — the exact
+  // situation where a local route matters most.
+  initLanLink();
 
   connectMqtt();
 }
@@ -1112,3 +1123,7 @@ export function submitRemoteProviderConfig(): void {
 (window as any).setupRemoteSeekControls = setupRemoteSeekControls;
 
 
+// Exposed for diagnostics: lets a user confirm from the console whether the
+// remote is on the direct peer link or still relaying through the broker.
+(window as any).isLanLinkActive = isLanLinkActive;
+(window as any).getLanLinkStatus = () => lanLink?.currentStatus ?? 'idle';
