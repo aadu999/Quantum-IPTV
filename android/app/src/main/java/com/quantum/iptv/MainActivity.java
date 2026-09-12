@@ -330,6 +330,17 @@ public class MainActivity extends BridgeActivity {
                 }
                 return true;
             }
+
+            // Offer every remaining keycode to the web layer before falling through.
+            // OEM remotes emit vendor-specific codes for P+/P-, GUIDE and colour
+            // buttons that are not in the AOSP constant set, so the switch above
+            // can never be exhaustive. onNativeTvKey() consults a runtime-editable
+            // map and reports back whether it consumed the key; anything it does
+            // not claim still reaches the WebView as a normal DOM key event.
+            if (action == KeyEvent.ACTION_DOWN && !event.isCanceled()) {
+                webView.evaluateJavascript(
+                    "window.onNativeTvKey ? window.onNativeTvKey(" + keyCode + ") : false;", null);
+            }
         }
         return super.dispatchKeyEvent(event);
     }

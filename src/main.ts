@@ -798,6 +798,10 @@ export function initApp(): void {
   if (!state.isRemoteClient) {
     engine.initHls();
 
+    // Bring up D-Pad navigation before any of the boot work below, so a failure
+    // while restoring the playlist can never leave the remote unresponsive.
+    initTvNavigation();
+
     // 1. Configure Malayalam Language & Live TV category by default on startup
     const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;
     const labelLanguageFilter = document.getElementById('label-language-filter');
@@ -885,8 +889,6 @@ export function initApp(): void {
       loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/kan.m3u', true, 'Kannada');
       loadM3uPlaylist('https://iptv-org.github.io/iptv/languages/hin.m3u', true, 'Hindi');
     }
-    // Initialize Android TV D-Pad spatial navigation
-    initTvNavigation();
   } else {
     adjustMobileVideoStage();
     const remoteLiveCount = state.channels.filter(c => c.type !== 'series' && c.type !== 'vod' && !c.seriesId && !c.vodId).length;

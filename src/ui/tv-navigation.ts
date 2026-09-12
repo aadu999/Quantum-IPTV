@@ -21,7 +21,14 @@ export function isAndroidTv(): boolean {
   );
 }
 
+let tvNavigationInitialized = false;
+
 export function initTvNavigation(): void {
+  // initApp() can invoke this more than once (boot + post-hydration); re-running
+  // it would stack duplicate keydown listeners and double every D-pad step.
+  if (tvNavigationInitialized) return;
+  tvNavigationInitialized = true;
+
   // Inject TV focus styles into head if not already present
   if (!document.getElementById('tv-navigation-styles')) {
     const style = document.createElement('style');
@@ -60,9 +67,6 @@ export function initTvNavigation(): void {
       (window as any).toggleFullscreenMode?.();
     });
   }
-
-  // Expose global TV navigation handlers for Android native bridge (MainActivity.java)
-  registerGlobalTvHandlers();
 
   // Intercept clicks on select elements to open TV picker
   const setupSelectInterceptors = () => {
@@ -118,7 +122,15 @@ export function initTvNavigation(): void {
   }, 1000);
 }
 
-function registerGlobalTvHandlers(): void {
+/**
+ * MainActivity.dispatchKeyEvent() reaches these through evaluateJavascript(), so
+ * they must exist from the moment the bundle is parsed. Registering them inside
+ * initTvNavigation() used to leave them undefined whenever anything earlier in
+ * initApp() threw — which is exactly how the P+/P- keys ended up doing nothing:
+ * the native side ran `window.playNextChannel && ...` against an undefined global
+ * and silently swallowed the keypress.
+ */
+export function registerGlobalTvHandlers(): void {
   (window as any).handleAndroidTvBack = handleAndroidTvBack;
   (window as any).playNextChannel = playNextChannel;
   (window as any).playPreviousChannel = playPreviousChannel;
@@ -132,7 +144,13 @@ function registerGlobalTvHandlers(): void {
   (window as any).closeTvSelectPicker = closeTvSelectPicker;
   (window as any).showTvFavoriteToast = showTvFavoriteToast;
   (window as any).focusElement = focusElement;
+  (window as any).onNativeTvKey = onNativeTvKey;
+  (window as any).learnTvKey = learnTvKey;
+  (window as any).getLastUnmappedTvKeyCode = getLastUnmappedTvKeyCode;
 }
+
+// Bind at module-evaluation time, before any of initApp()'s work can fail.
+registerGlobalTvHandlers();
 
 export function handleAndroidTvBack(): boolean {
   // 0. If soft keyboard or search input is actively focused, dismiss it
@@ -226,24 +244,51 @@ export function showTvChannelSwitchHud(
   }, 2400);
 }
 
-export function playNextChannel(): void {
-  if (state.filteredChannels.length === 0) return;
-  const nextIndex = (state.currentChannelIndex + 1) % state.filteredChannels.length;
-  const ch = state.filteredChannels[nextIndex];
-  if (ch) {
-    showTvChannelSwitchHud(ch.name, nextIndex, ch.logo, ch.group);
+function isLiveEntry(ch: { type?: string; seriesId?: string; vodId?: string } | undefined): boolean {
+  if (!ch) return false;
+  return ch.type !== 'series' && ch.type !== 'vod' && !ch.seriesId && !ch.vodId;
+}
+
+/**
+ * P+/P- step through the list in `step` direction. When the current entry is a
+ * live channel the walk skips over VOD and series rows: zapping with the channel
+ * keys should never drop the viewer into a movie, which is what a naive
+ * index + 1 does on a mixed Xtream catalogue.
+ */
+function stepChannel(step: 1 | -1): void {
+  const list = state.filteredChannels;
+  if (list.length === 0) return;
+
+  const stayLive = isLiveEntry(list[state.currentChannelIndex]);
+  let index = state.currentChannelIndex;
+
+  for (let hops = 0; hops < list.length; hops++) {
+    index = (index + step + list.length) % list.length;
+    const candidate = list[index];
+    if (!candidate) continue;
+    if (!stayLive || isLiveEntry(candidate)) {
+      showTvChannelSwitchHud(candidate.name, index, candidate.logo, candidate.group);
+      (window as any).playChannel?.(index, { directPlay: true });
+      return;
+    }
   }
-  (window as any).playChannel?.(nextIndex, { directPlay: true });
+
+  // Every other entry is VOD/series — fall back to a plain step so the keys
+  // still do something rather than appearing dead.
+  const fallbackIndex = (state.currentChannelIndex + step + list.length) % list.length;
+  const fallback = list[fallbackIndex];
+  if (fallback) {
+    showTvChannelSwitchHud(fallback.name, fallbackIndex, fallback.logo, fallback.group);
+    (window as any).playChannel?.(fallbackIndex, { directPlay: true });
+  }
+}
+
+export function playNextChannel(): void {
+  stepChannel(1);
 }
 
 export function playPreviousChannel(): void {
-  if (state.filteredChannels.length === 0) return;
-  const prevIndex = (state.currentChannelIndex - 1 + state.filteredChannels.length) % state.filteredChannels.length;
-  const ch = state.filteredChannels[prevIndex];
-  if (ch) {
-    showTvChannelSwitchHud(ch.name, prevIndex, ch.logo, ch.group);
-  }
-  (window as any).playChannel?.(prevIndex, { directPlay: true });
+  stepChannel(-1);
 }
 
 export function toggleTvGuide(): void {
@@ -749,20 +794,151 @@ function retryFocusAfterScroll(dir: Direction, previousEl: HTMLElement): void {
   }
 }
 
+/**
+ * Numeric keyCodes for TV remote buttons that have no standardised `key` name.
+ * Android WebView reports these as `Unidentified`, and Tizen/webOS/Fire TV each
+ * use their own vendor ranges, so a `key`-only switch silently ignores them —
+ * which is why P+/P- did nothing on several boxes even when the key reached JS.
+ */
+const TV_KEYCODE_MAP: Record<number, string> = {
+  33: 'ChannelUp',      // PageUp — webOS and most generic HID remotes
+  34: 'ChannelDown',    // PageDown
+  166: 'ChannelUp',     // Android KEYCODE_CHANNEL_UP leaked as a raw keyCode
+  167: 'ChannelDown',   // Android KEYCODE_CHANNEL_DOWN
+  427: 'ChannelUp',     // Tizen
+  428: 'ChannelDown',   // Tizen
+  19: 'MediaPause',
+  179: 'MediaPlayPause',
+  227: 'MediaRewind',
+  228: 'MediaFastForward',
+  415: 'MediaPlay',
+  403: 'ColorRed',      // CE-HTML / HbbTV colour keys (Tizen, webOS, most DVB sets)
+  404: 'ColorGreen',
+  405: 'ColorYellow',
+  406: 'ColorBlue',
+  461: 'Back',          // webOS
+  10009: 'Back',        // Tizen
+  457: 'Info'
+};
+
+/**
+ * Collapses the three ways a remote button can arrive (`key`, `code`, numeric
+ * `keyCode`) into one canonical name so the handler below only branches once.
+ */
+function resolveTvKey(e: KeyboardEvent): string {
+  if (e.key && e.key !== 'Unidentified') return e.key;
+  const code = e.keyCode || (e as any).which || 0;
+  return TV_KEYCODE_MAP[code] || e.key || '';
+}
+
+/** Android `KeyEvent` constants, as delivered by MainActivity.dispatchKeyEvent(). */
+const ANDROID_KEYCODE_MAP: Record<number, string> = {
+  166: 'ChannelUp',
+  167: 'ChannelDown',
+  87: 'ChannelUp',        // MEDIA_NEXT — doubles as P+ on many TV-box remotes
+  88: 'ChannelDown',      // MEDIA_PREVIOUS
+  92: 'ChannelUp',        // PAGE_UP
+  93: 'ChannelDown',      // PAGE_DOWN
+  272: 'ChannelUp',       // MEDIA_SKIP_FORWARD
+  273: 'ChannelDown',     // MEDIA_SKIP_BACKWARD
+  274: 'ChannelUp',       // MEDIA_STEP_FORWARD
+  275: 'ChannelDown',     // MEDIA_STEP_BACKWARD
+  183: 'ColorRed',
+  184: 'ColorGreen',
+  185: 'ColorYellow',
+  186: 'ColorBlue',
+  172: 'Guide',           // KEYCODE_GUIDE
+  165: 'Info'             // KEYCODE_INFO
+};
+
+/** Last unrecognised keycode, surfaced so an unusual remote can be mapped. */
+let lastUnmappedAndroidKeyCode: number | null = null;
+
+/**
+ * Entry point for keycodes MainActivity could not classify. Returns true when
+ * the key was consumed so the native side knows not to pass it on.
+ *
+ * User overrides persist in localStorage under `quantum_tv_keymap`, which lets a
+ * remote with vendor-specific P+/P- codes be taught without another APK build.
+ */
+export function onNativeTvKey(keyCode: number): boolean {
+  const overrides = loadKeymapOverrides();
+  const action = overrides[keyCode] || ANDROID_KEYCODE_MAP[keyCode];
+
+  if (!action) {
+    lastUnmappedAndroidKeyCode = keyCode;
+    return false;
+  }
+
+  switch (action) {
+    case 'ChannelUp':
+      playNextChannel();
+      return true;
+    case 'ChannelDown':
+      playPreviousChannel();
+      return true;
+    case 'ColorRed':
+    case 'ColorGreen':
+    case 'ColorYellow':
+    case 'ColorBlue':
+      handleTvColorButton(action.replace('Color', '').toLowerCase());
+      return true;
+    case 'Guide':
+      toggleTvGuide();
+      return true;
+    case 'Info':
+      (window as any).toggleFullscreenMode?.();
+      return true;
+    default:
+      return false;
+  }
+}
+
+function loadKeymapOverrides(): Record<number, string> {
+  try {
+    return JSON.parse(localStorage.getItem('quantum_tv_keymap') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Binds the most recently seen unrecognised remote button to an action, so a
+ * viewer whose P+ key does nothing can press it once and then call
+ * `learnTvKey('ChannelUp')` from the diagnostics panel to fix it permanently.
+ */
+export function learnTvKey(action: string): number | null {
+  if (lastUnmappedAndroidKeyCode === null) return null;
+  const overrides = loadKeymapOverrides();
+  overrides[lastUnmappedAndroidKeyCode] = action;
+  try {
+    localStorage.setItem('quantum_tv_keymap', JSON.stringify(overrides));
+  } catch {
+    /* storage unavailable */
+  }
+  return lastUnmappedAndroidKeyCode;
+}
+
+export function getLastUnmappedTvKeyCode(): number | null {
+  return lastUnmappedAndroidKeyCode;
+}
+
 function handleTvKeyDown(e: KeyboardEvent): void {
+  const key = resolveTvKey(e);
+
   // If user is actively typing text in an input field (search), let standard typing work
-  if (e.target instanceof HTMLInputElement && !['ArrowUp', 'ArrowDown', 'Escape', 'Enter'].includes(e.key)) {
+  if (e.target instanceof HTMLInputElement && !['ArrowUp', 'ArrowDown', 'Escape', 'Enter'].includes(key)) {
     return;
   }
 
   // Number keys (0-9) for direct channel dialing
-  if (e.key >= '0' && e.key <= '9' && !(e.target instanceof HTMLInputElement)) {
+  if (key >= '0' && key <= '9' && key.length === 1 && !(e.target instanceof HTMLInputElement)) {
     e.preventDefault();
-    handleTvDigitKey(parseInt(e.key, 10));
+    handleTvDigitKey(parseInt(key, 10));
     return;
   }
 
-  switch (e.key) {
+  switch (key) {
     // D-Pad Directional Navigation - Pure spatial navigation across ALL buttons!
     case 'ArrowDown':
       {
@@ -953,14 +1129,48 @@ function handleTvKeyDown(e: KeyboardEvent): void {
     // Channel Up / Down & Program + / - hardware keys
     case 'ChannelUp':
     case 'PageUp':
+    case 'MediaTrackNext':
       e.preventDefault();
       playNextChannel();
       break;
 
     case 'ChannelDown':
     case 'PageDown':
+    case 'MediaTrackPrevious':
       e.preventDefault();
       playPreviousChannel();
+      break;
+
+    // CE-HTML / HbbTV colour keys, resolved from vendor keyCodes above
+    case 'ColorRed':
+      e.preventDefault();
+      handleTvColorButton('red');
+      break;
+
+    case 'ColorGreen':
+      e.preventDefault();
+      handleTvColorButton('green');
+      break;
+
+    case 'ColorYellow':
+      e.preventDefault();
+      handleTvColorButton('yellow');
+      break;
+
+    case 'ColorBlue':
+      e.preventDefault();
+      handleTvColorButton('blue');
+      break;
+
+    case 'Info':
+      e.preventDefault();
+      (window as any).toggleFullscreenMode?.();
+      break;
+
+    case 'Guide':
+    case 'TvGuide':
+      e.preventDefault();
+      toggleTvGuide();
       break;
 
     // Media hardware keys

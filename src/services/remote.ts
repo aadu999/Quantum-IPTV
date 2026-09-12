@@ -4,15 +4,109 @@ import { QuantumSessionStore } from '../state/session';
 import { parseXtreamInput, getXtreamCredentials, xtreamConnector } from './xtream';
 import { formatTimestamp } from '../ui/controls';
 import { showAppAlert } from '../ui/dialog';
+import { QuantumLanLink, LanLinkStatus } from './lan-link';
 
 declare const mqtt: any;
 declare const QRCode: any;
 
 let mqttClient: any = null;
+let lanLink: QuantumLanLink | null = null;
 const broadcastChan =
   typeof window !== 'undefined' && window.BroadcastChannel
     ? new BroadcastChannel(`quantum_iptv_${state.roomId}`)
     : null;
+
+function rtcTopic(): string {
+  return `quantum_tv/${state.roomId}/rtc`;
+}
+
+function publishSignal(payload: any): void {
+  if (mqttClient && mqttClient.connected) {
+    mqttClient.publish(rtcTopic(), JSON.stringify({ ...payload, roomId: state.roomId }));
+  }
+  // BroadcastChannel covers the same-device case (TV and remote tabs in one
+  // browser), where MQTT may not be up yet.
+  if (broadcastChan) broadcastChan.postMessage({ action: 'RTC_SIGNAL', payload });
+}
+
+function updateLanBadge(status: LanLinkStatus, detail?: string): void {
+  const label = document.getElementById('remote-link-mode');
+  const dot = document.getElementById('remote-link-dot');
+  const isDirect = status === 'connected';
+
+  if (label) {
+    label.textContent = isDirect
+      ? 'Direct LAN · low latency'
+      : status === 'connecting' || status === 'signalling'
+      ? 'Linking over Wi-Fi…'
+      : 'Relay via broker';
+  }
+  if (dot) {
+    dot.className = isDirect
+      ? 'w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]'
+      : 'w-1.5 h-1.5 rounded-full bg-amber-400';
+  }
+  if (detail && isDirect) {
+    console.log(`[QuantumRemote] Peer link established (${detail}).`);
+  }
+}
+
+/**
+ * Brings up the direct peer link. Signalling rides the broker; everything after
+ * the handshake goes device-to-device. Safe to call repeatedly.
+ */
+function initLanLink(): void {
+  if (lanLink) return;
+  lanLink = new QuantumLanLink(state.isRemoteClient ? 'remote' : 'tv', {
+    onMessage: data => {
+      if (!data) return;
+      if (state.isRemoteClient) {
+        if (data.action === 'SYNC_STATE') updateRemoteStateView(data.payload);
+        else if (data.action === 'SYNC_CATALOG') handleIncomingCatalogSync(data.payload);
+      } else {
+        handleIncomingRemoteCommand(data);
+      }
+    },
+    onStatusChange: (status, detail) => {
+      updateLanBadge(status, detail);
+      // A freshly opened direct link starts empty: pull the full state and the
+      // untruncated catalogue across it immediately.
+      if (status === 'connected') {
+        if (state.isRemoteClient) {
+          sendRemoteCmd('REQUEST_SYNC');
+        } else {
+          broadcastTVState();
+          broadcastTVCatalog();
+        }
+      }
+    },
+    publishSignal
+  });
+  lanLink.start();
+}
+
+export function isLanLinkActive(): boolean {
+  return !!lanLink?.connected;
+}
+
+/**
+ * Strips provider credentials from anything bound for the shared MQTT broker.
+ *
+ * The broker is a public one and the room topic is guessable, so a full session
+ * blob published there hands an eavesdropper the user's Xtream host, username
+ * and password in cleartext. Credentials now travel only over the DTLS-encrypted
+ * peer link; the relayed copy keeps just enough for the remote to describe the
+ * connection in its UI.
+ */
+function redactSessionForRelay(session: any): any {
+  if (!session) return session;
+  const { xtreamPass, stalkerMac, ...safe } = session;
+  return {
+    ...safe,
+    xtreamUser: session.xtreamUser ? '•••' : undefined,
+    credentialsWithheld: Boolean(xtreamPass || stalkerMac)
+  };
+}
 
 export function dismissRemoteModalOnConnect(): void {
   const remoteModal = document.getElementById('modal-remote');
@@ -26,6 +120,10 @@ export function initRemoteSync(): void {
   if (broadcastChan) {
     broadcastChan.onmessage = (event: MessageEvent) => {
       if (!event.data) return;
+      if (event.data.action === 'RTC_SIGNAL') {
+        lanLink?.handleSignal(event.data.payload);
+        return;
+      }
       if (state.isRemoteClient) {
         if (event.data.action === 'SYNC_STATE') updateRemoteStateView(event.data.payload);
         if (event.data.action === 'SYNC_CATALOG') handleIncomingCatalogSync(event.data.payload);
@@ -62,6 +160,11 @@ export function initRemoteSync(): void {
           const chunkTopic = `quantum_tv/${state.roomId}/catalog_chunk`;
           const presenceTopic = `quantum_tv/${state.roomId}/presence`;
 
+          // Both roles listen for signalling; the link itself then negotiates
+          // the direct route and takes over from the broker.
+          mqttClient.subscribe(rtcTopic());
+          initLanLink();
+
           if (state.isRemoteClient) {
             mqttClient.subscribe(stateTopic);
             mqttClient.subscribe(catalogTopic);
@@ -97,6 +200,10 @@ export function initRemoteSync(): void {
         mqttClient.on('message', (topic: string, payload: any) => {
           try {
             const data = JSON.parse(payload.toString());
+            if (topic.endsWith('/rtc')) {
+              lanLink?.handleSignal(data);
+              return;
+            }
             if (state.isRemoteClient) {
               if (topic.endsWith('/state')) updateRemoteStateView(data);
               if (topic.endsWith('/catalog')) handleIncomingCatalogSync(data);
@@ -134,7 +241,13 @@ export function sendRemoteCmd(action: string, payload: Record<string, any> = {})
   const msgId = `${action}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const cmd = { msgId, action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
 
+  // Direct LAN first — a keypress lands in single-digit milliseconds. send()
+  // only reports true once the DataChannel is genuinely open, so falling back to
+  // the broker below is safe whenever the peer link is down or still forming.
+  const sentDirect = lanLink?.send(cmd) ?? false;
+
   if (broadcastChan) broadcastChan.postMessage(cmd);
+  if (sentDirect) return;
   if (mqttClient) {
     if (mqttClient.connected) {
       mqttClient.publish(`quantum_tv/${state.roomId}/cmd`, JSON.stringify(cmd));
@@ -173,8 +286,10 @@ export function broadcastTVState(): void {
     favorites: state.favorites
   };
 
+  const sentDirect = lanLink?.send({ action: 'SYNC_STATE', payload: tvState }) ?? false;
+
   if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_STATE', payload: tvState });
-  if (mqttClient && mqttClient.connected) {
+  if (!sentDirect && mqttClient && mqttClient.connected) {
     mqttClient.publish(`quantum_tv/${state.roomId}/state`, JSON.stringify(tvState));
   }
 }
@@ -200,13 +315,22 @@ export function broadcastTVCatalog(): void {
   };
 
   if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_CATALOG', payload: catalogData });
+
+  // Over the direct link the whole catalogue goes across in one reassembled
+  // message. The MQTT path below can only carry a few hundred rows before the
+  // broker's rate limits start dropping chunks, which is why the remote used to
+  // show a truncated list; that path is now the fallback, not the default.
+  if (lanLink?.send({ action: 'SYNC_CATALOG', payload: { ...catalogData, favorites: state.favorites } })) {
+    return;
+  }
+
   if (mqttClient && mqttClient.connected) {
     // 1. Send catalog header with channel counts and session
     const catalogHeader = {
       channelCount: state.channels ? state.channels.length : 0,
       seriesCount: series.length,
       movieCount: movies.length,
-      session: session,
+      session: redactSessionForRelay(session),
       favorites: state.favorites
     };
     mqttClient.publish(`quantum_tv/${state.roomId}/catalog`, JSON.stringify(catalogHeader));
@@ -375,8 +499,28 @@ export function handleIncomingCatalogChunk(payload: any): void {
 }
 
 const processedRemoteMsgIds = new Set<string>();
-let lastRemoteCmdAction: string | null = null;
-let lastRemoteCmdTime = 0;
+const lastActionAtByName = new Map<string, number>();
+
+/**
+ * Minimum gap between two accepted presses of the same action.
+ *
+ * A single blanket 300ms window used to apply to every command, which made the
+ * remote feel broken: holding volume down, or pressing P+ twice quickly, had the
+ * second press silently discarded. Repeat suppression is only needed for
+ * commands that are *toggles* — firing those twice within a frame of each other
+ * is almost always one physical press arriving over both transports. Idempotent
+ * and intentionally-repeatable commands (volume, channel, seek) are never
+ * throttled; genuine duplicates are already filtered by msgId.
+ */
+const ACTION_REPEAT_GUARD_MS: Record<string, number> = {
+  PLAY_PAUSE: 350,
+  OK: 350,
+  MUTE: 350,
+  FULLSCREEN: 600,
+  REMOTE_JOINED: 1500,
+  REQUEST_SYNC: 1500,
+  REQUEST_CATALOG_SYNC: 1500
+};
 
 export function handleIncomingRemoteCommand(msg: any): void {
   if (!msg || !msg.action || state.isRemoteClient) return;
@@ -402,11 +546,12 @@ export function handleIncomingRemoteCommand(msg: any): void {
   }
 
   const now = Date.now();
-  if (msg.action === lastRemoteCmdAction && now - lastRemoteCmdTime < 300) {
-    return;
+  const guardMs = ACTION_REPEAT_GUARD_MS[msg.action];
+  if (guardMs) {
+    const lastAt = lastActionAtByName.get(msg.action) || 0;
+    if (now - lastAt < guardMs) return;
   }
-  lastRemoteCmdAction = msg.action;
-  lastRemoteCmdTime = now;
+  lastActionAtByName.set(msg.action, now);
 
   const video = document.getElementById('video-player') as HTMLVideoElement | null;
   const volSlider = document.getElementById('vol-slider') as HTMLInputElement | null;
@@ -423,19 +568,14 @@ export function handleIncomingRemoteCommand(msg: any): void {
     case 'OK':
       (window as any).togglePlayPause?.();
       break;
+    // Route through the same walker the physical P+/P- keys use: it forces
+    // directPlay (so a series row zaps instead of popping the episode explorer
+    // open on the TV) and skips over VOD entries while watching live.
     case 'CH_NEXT':
-      if (state.currentChannelIndex < state.filteredChannels.length - 1) {
-        (window as any).playChannel?.(state.currentChannelIndex + 1);
-      } else {
-        (window as any).playChannel?.(0);
-      }
+      (window as any).playNextChannel?.();
       break;
     case 'CH_PREV':
-      if (state.currentChannelIndex > 0) {
-        (window as any).playChannel?.(state.currentChannelIndex - 1);
-      } else {
-        (window as any).playChannel?.(state.filteredChannels.length - 1);
-      }
+      (window as any).playPreviousChannel?.();
       break;
     case 'VOL_UP':
       if (video) {
