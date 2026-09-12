@@ -218,3 +218,39 @@ button, input, select, a, .touch-target {
     min-height: 40px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Native Android Picture-in-Picture
+
+   The web PiP API detaches just the <video> element, but Android's native PiP
+   shrinks the entire activity into a tile a couple of hundred pixels wide. All
+   the surrounding chrome would be rendered into that tile, unreadable and
+   covering the picture, so it is hidden for the duration and the video is
+   allowed to fill the whole surface.
+   ------------------------------------------------------------------------- */
+body.native-pip-active #player-controls,
+body.native-pip-active #engine-hud,
+body.native-pip-active #quick-stream-badges,
+body.native-pip-active #exit-theater-btn,
+body.native-pip-active #tv-channel-switch-hud,
+body.native-pip-active #tv-volume-hud,
+body.native-pip-active aside,
+body.native-pip-active header {
+  display: none !important;
+}
+
+body.native-pip-active #video-stage {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  min-height: 0 !important;
+}
+
+body.native-pip-active #video-player {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}

@@ -1,9 +1,15 @@
 package com.quantum.iptv;
 
+import android.annotation.TargetApi;
+import android.app.PictureInPictureParams;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Rational;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.JavascriptInterface;
@@ -93,6 +99,57 @@ public class MainActivity extends BridgeActivity {
             });
         }
 
+        /**
+         * True on Android TV / leanback devices. The web layer uses this to keep
+         * phone-only affordances (such as Picture-in-Picture) off the TV, where
+         * they are meaningless and would add another D-pad focus stop.
+         */
+        @JavascriptInterface
+        public boolean isTvDevice() {
+            try {
+                return getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        /**
+         * Puts the activity into Picture-in-Picture.
+         *
+         * Android's WebView does not implement the HTMLVideoElement
+         * requestPictureInPicture() API, so inside the APK the web call is a
+         * no-op and the whole activity has to be handed to the system instead.
+         * Returns false when unavailable so the caller can fall back or hide the
+         * control rather than appearing to do nothing.
+         */
+        // minSdk is 23, and PictureInPictureParams is API 26. The guards below are
+        // the real protection; the annotation stops lint from flagging the class
+        // reference inside the lambda, where it does not always carry the
+        // surrounding version check through.
+        @TargetApi(Build.VERSION_CODES.O)
+        @JavascriptInterface
+        public boolean enterPictureInPicture() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false;
+            try {
+                if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK)) return false;
+                if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false;
+            } catch (Exception e) {
+                return false;
+            }
+
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+                try {
+                    PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+                    // Android rejects ratios outside roughly 1:2.39..2.39:1, so an
+                    // odd stream aspect must be clamped rather than passed through.
+                    builder.setAspectRatio(new Rational(16, 9));
+                    enterPictureInPictureMode(builder.build());
+                } catch (Exception ignored) {}
+            });
+            return true;
+        }
+
         @JavascriptInterface
         public void toggleMute() {
             runOnUiThread(() -> {
@@ -124,13 +181,39 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
-        applyImmersiveFullscreen();
+        if (!isInPipMode()) {
+            applyImmersiveFullscreen();
+        }
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
+        // In PiP the window is unfocused and tiny; re-asserting immersive
+        // fullscreen there fights the system and can resize the surface.
+        if (hasFocus && !isInPipMode()) {
+            applyImmersiveFullscreen();
+        }
+    }
+
+    private boolean isInPipMode() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
+    }
+
+    /**
+     * Lets the web layer strip its chrome down to bare video while the window is
+     * a PiP tile, and restore it on the way back out.
+     */
+    @TargetApi(Build.VERSION_CODES.O)
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        WebView webView = this.getBridge().getWebView();
+        if (webView != null) {
+            webView.evaluateJavascript(
+                "window.onNativePipModeChanged && window.onNativePipModeChanged(" + isInPictureInPictureMode + ");", null);
+        }
+        if (!isInPictureInPictureMode) {
             applyImmersiveFullscreen();
         }
     }

@@ -663,6 +663,15 @@
             <button id="btn-aspect" class="px-1.5 sm:px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] sm:text-[11px] font-mono border border-slate-700/60 shrink-0" title="Cycle Aspect Ratio (16:9, Fill, Stretch)">
               16:9
             </button>
+            <!--
+              Picture-in-Picture. Starts hidden and is revealed by main.ts only
+              where PiP actually works; tabindex="-1" keeps it out of the D-pad
+              spatial navigation, which is why this control was dropped from the
+              TV build in the first place.
+            -->
+            <button id="btn-pip" tabindex="-1" class="hidden w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white items-center justify-center transition shrink-0" title="Picture in Picture (I)">
+              <i class="fa-solid fa-clone text-xs pointer-events-none"></i>
+            </button>
             <button id="btn-player-remote" onclick="openRemoteModal()" class="px-1.5 sm:px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white text-[10px] sm:text-[11px] font-mono border border-indigo-500/40 shrink-0 flex items-center gap-1 transition shadow-sm" title="Start Quant Remote (Scan QR / Menu Key)">
               <i class="fa-solid fa-qrcode text-[11px]"></i><span class="hidden sm:inline">Remote</span>
             </button>

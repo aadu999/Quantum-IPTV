@@ -119,6 +119,103 @@ export function closeRemoteModal(): void {
   if (modal) modal.classList.add('hidden');
 }
 
+/** True when the app is running on an Android TV / leanback device. */
+function isLeanbackDevice(): boolean {
+  const native = (window as any).AndroidTvNative;
+  // The native bridge knows for certain (PackageManager.FEATURE_LEANBACK);
+  // outside the APK fall back to user-agent sniffing.
+  if (native && typeof native.isTvDevice === 'function') {
+    try {
+      return !!native.isTvDevice();
+    } catch {
+      /* older APK without the method — fall through */
+    }
+  }
+  const ua = navigator.userAgent.toLowerCase();
+  // Fire TV reports model codes such as AFTB, AFTT and AFTKA, so the prefix must
+  // stay open-ended -- an \baft\b anchor misses every one of them.
+  return /android tv|googletv|google tv|leanback|\baft[a-z0-9]*\b|smart-tv|smarttv|crkey|bravia|webos|tizen|hbbtv|viera|netcast/.test(ua);
+}
+
+/**
+ * Restores Picture-in-Picture.
+ *
+ * The control was removed from the markup in 88d8c87 while its click handler was
+ * left behind in this file, so for several releases the feature looked wired up
+ * but had no button to trigger it. It is back, with the two things that were
+ * missing before: it is only shown where PiP genuinely works, and it is excluded
+ * from D-pad navigation (via tabindex="-1") so it does not add a dead focus stop
+ * on TV — the reason it was dropped.
+ */
+function setupPictureInPicture(btnPip: HTMLElement, video: HTMLVideoElement): void {
+  const nativeBridge = (window as any).AndroidTvNative;
+  const hasNativePip = !!nativeBridge && typeof nativeBridge.enterPictureInPicture === 'function';
+  // Android's WebView does not implement the HTMLVideoElement PiP API, so inside
+  // the APK the web call silently does nothing and the native path is required.
+  const hasWebPip =
+    typeof document !== 'undefined' &&
+    (document as any).pictureInPictureEnabled === true &&
+    typeof (video as any).requestPictureInPicture === 'function' &&
+    !(video as any).disablePictureInPicture;
+
+  if (isLeanbackDevice() || (!hasWebPip && !hasNativePip)) {
+    // Leave it hidden rather than offering a button that cannot work.
+    return;
+  }
+
+  btnPip.classList.remove('hidden');
+  btnPip.classList.add('flex');
+
+  const setIcon = (active: boolean) => {
+    btnPip.innerHTML = `<i class="fa-solid ${
+      active ? 'fa-compress' : 'fa-clone'
+    } text-xs pointer-events-none"></i>`;
+    btnPip.setAttribute('title', active ? 'Exit Picture in Picture (I)' : 'Picture in Picture (I)');
+  };
+
+  const toggle = async () => {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+      }
+      if (hasWebPip) {
+        await (video as any).requestPictureInPicture();
+        return;
+      }
+      if (hasNativePip && nativeBridge.enterPictureInPicture() === false) {
+        engine.showToast('Picture-in-Picture is not available on this device.', 'error');
+      }
+    } catch (err: any) {
+      // Chrome rejects the request when it is not tied to a user gesture, or
+      // when no video track is decoding yet.
+      console.warn('[QuantumPiP] Request failed:', err?.message || err);
+      engine.showToast('Picture-in-Picture could not start right now.', 'error');
+    }
+  };
+
+  btnPip.addEventListener('click', toggle);
+  video.addEventListener('enterpictureinpicture', () => setIcon(true));
+  video.addEventListener('leavepictureinpicture', () => setIcon(false));
+
+  // Keyboard shortcut, matching the hint in the button's tooltip.
+  window.addEventListener('keydown', e => {
+    if (e.key !== 'i' && e.key !== 'I') return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    e.preventDefault();
+    toggle();
+  });
+
+  // Native PiP swaps the whole activity into a small tile, so the player chrome
+  // has to get out of the way; the web API only moves the video element.
+  (window as any).onNativePipModeChanged = (inPip: boolean) => {
+    document.body.classList.toggle('native-pip-active', !!inPip);
+    setIcon(!!inPip);
+  };
+
+  setIcon(!!document.pictureInPictureElement);
+}
+
 export function dismissBootSplash(): void {
   const splash = document.getElementById('app-boot-splash');
   if (!splash || splash.classList.contains('dismissed')) return;
@@ -498,16 +595,8 @@ export function setupEventListeners(): void {
     });
   }
 
-  if (btnPip) {
-    btnPip.addEventListener('click', async () => {
-      try {
-        if (document.pictureInPictureElement) {
-          await document.exitPictureInPicture();
-        } else if (video) {
-          await video.requestPictureInPicture();
-        }
-      } catch (e) {}
-    });
+  if (btnPip && video) {
+    setupPictureInPicture(btnPip, video);
   }
 
   const tabChannels = document.getElementById('tab-btn-channels');
