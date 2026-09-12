@@ -1218,6 +1218,9 @@
           <div class="flex items-center gap-1.5 text-[10px]">
             <span id="remote-status-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse"></span>
             <span id="remote-conn-status" class="text-emerald-400 font-medium">Connected to Quant TV</span>
+            <span class="text-slate-700">·</span>
+            <span id="remote-link-dot" class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            <span id="remote-link-mode" class="text-slate-400 font-medium">Relay via broker</span>
           </div>
         </div>
       </div>
@@ -1375,6 +1378,9 @@
           <button onclick="setRemoteCategory('News')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800 transition" data-cat="News">News</button>
           <button onclick="setRemoteCategory('Sports')" class="rem-cat-btn px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 font-medium whitespace-nowrap border border-slate-800 transition" data-cat="Sports">Sports</button>
         </div>
+
+        <!-- Language / group / sort filters, populated from the synced catalogue -->
+        <div id="remote-filter-bar" class="flex items-center gap-1.5"></div>
       </div>
 
       <!-- Scrollable Channels Render Area (Scrolls independently below the pinned search) -->

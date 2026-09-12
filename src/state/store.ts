@@ -321,6 +321,19 @@ export class ExpiringChannelSet extends Set<string> {
   }
 }
 
+/**
+ * Filters available on the companion remote. The remote previously offered only
+ * a hardcoded strip of seven category pills, so a viewer with a few thousand
+ * channels had no way to narrow by language or group from their phone even
+ * though the TV itself exposes both.
+ */
+export interface RemoteFilters {
+  language: string;
+  group: string;
+  favouritesOnly: boolean;
+  sort: 'default' | 'name' | 'group';
+}
+
 export interface State {
   channels: Channel[];
   filteredChannels: Channel[];
@@ -335,6 +348,7 @@ export interface State {
   isRemoteClient: boolean;
   remoteLimit: number;
   remoteActiveCategory: string;
+  remoteFilters: RemoteFilters;
   hideOfflineFeeds: boolean;
   lastXtreamHost?: string;
   lastXtreamUser?: string;
@@ -355,6 +369,7 @@ export const state: State = {
   isRemoteClient: typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('remote'),
   remoteLimit: 60,
   remoteActiveCategory: 'ALL',
+  remoteFilters: { language: 'ALL', group: 'ALL', favouritesOnly: false, sort: 'default' },
   hideOfflineFeeds: false
 };
 

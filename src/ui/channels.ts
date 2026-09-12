@@ -446,6 +446,144 @@ export function updateLanguageDropdown(): void {
 }
 
 // Remote Channels List
+export function escapeHtml(value: string): string {
+  return String(value).replace(/[&<>"']/g, ch =>
+    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+  );
+}
+
+/** Attribute values need the same treatment plus backtick safety. */
+export function escapeAttr(value: string): string {
+  return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
+/**
+ * One delegated listener for the whole list, instead of an inline handler per
+ * row carrying interpolated channel metadata. Besides closing the injection hole
+ * this keeps a 6,000-row render from building thousands of handler strings.
+ */
+function attachRemoteListDelegation(container: HTMLElement): void {
+  if (container.dataset.hasClickDelegation) return;
+  container.dataset.hasClickDelegation = 'true';
+
+  container.addEventListener('click', event => {
+    const target = (event.target as HTMLElement)?.closest('[data-remote-action]') as HTMLElement | null;
+    if (!target) return;
+
+    const id = target.getAttribute('data-remote-id');
+    const action = target.getAttribute('data-remote-action');
+    if (!id || !action) return;
+
+    const channel = state.channels.find(c => c.id === id);
+    if (!channel) return;
+
+    event.stopPropagation();
+
+    if (action === 'fav') {
+      (window as any).toggleRemoteFav?.(id, event);
+      return;
+    }
+    if (action === 'movie') {
+      (window as any).openRemoteMovieExplorerById?.(id);
+      return;
+    }
+    if (action === 'series') {
+      (window as any).openRemoteSeriesExplorerById?.(id);
+      return;
+    }
+
+    sendRemoteCmd('TUNE_CHANNEL', {
+      id: channel.id,
+      url: channel.url,
+      name: channel.name,
+      logo: channel.logo,
+      program: channel.program,
+      type: channel.type || 'live'
+    });
+  });
+}
+
+/**
+ * Builds the language, group and favourites controls from whatever the TV has
+ * actually synced, so the options always reflect the real catalogue rather than
+ * a fixed list written when the app only shipped Indian presets.
+ */
+export function renderRemoteFilterBar(): void {
+  const bar = document.getElementById('remote-filter-bar');
+  if (!bar) return;
+
+  const languages = new Set<string>();
+  const groups = new Set<string>();
+  for (const ch of state.channels) {
+    if (ch.language) languages.add(ch.language);
+    if (ch.group) groups.add(ch.group);
+  }
+
+  const filters = state.remoteFilters;
+  const sortedLanguages = [...languages].sort((a, b) => a.localeCompare(b));
+  // Groups can run to hundreds on a large Xtream account; cap the dropdown so it
+  // stays usable on a phone, and keep the active one visible even if truncated.
+  const sortedGroups = [...groups].sort((a, b) => a.localeCompare(b)).slice(0, 200);
+  if (filters.group !== 'ALL' && !sortedGroups.includes(filters.group)) {
+    sortedGroups.unshift(filters.group);
+  }
+
+  const option = (value: string, label: string, selected: boolean) =>
+    `<option value="${escapeAttr(value)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+
+  bar.innerHTML = `
+    <select id="remote-filter-language" class="bg-slate-900 text-slate-200 text-[11px] rounded-lg px-2 py-1.5 border border-slate-800 focus:outline-none focus:border-brand-500 min-w-0 flex-1">
+      ${option('ALL', `All languages (${sortedLanguages.length})`, filters.language === 'ALL')}
+      ${sortedLanguages.map(l => option(l, l, filters.language === l)).join('')}
+    </select>
+    <select id="remote-filter-group" class="bg-slate-900 text-slate-200 text-[11px] rounded-lg px-2 py-1.5 border border-slate-800 focus:outline-none focus:border-brand-500 min-w-0 flex-1">
+      ${option('ALL', 'All groups', filters.group === 'ALL')}
+      ${sortedGroups.map(g => option(g, g, filters.group === g)).join('')}
+    </select>
+    <select id="remote-filter-sort" class="bg-slate-900 text-slate-200 text-[11px] rounded-lg px-2 py-1.5 border border-slate-800 focus:outline-none focus:border-brand-500 shrink-0">
+      ${option('default', 'Playlist order', filters.sort === 'default')}
+      ${option('name', 'A–Z', filters.sort === 'name')}
+      ${option('group', 'By group', filters.sort === 'group')}
+    </select>
+    <button id="remote-filter-favs" title="Favourites only" class="px-2.5 py-1.5 rounded-lg border text-[11px] shrink-0 transition ${
+      filters.favouritesOnly
+        ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+        : 'bg-slate-900 border-slate-800 text-slate-400'
+    }">
+      <i class="${filters.favouritesOnly ? 'fa-solid' : 'fa-regular'} fa-star pointer-events-none"></i>
+    </button>
+  `;
+
+  bar.querySelector('#remote-filter-language')?.addEventListener('change', e => {
+    state.remoteFilters.language = (e.target as HTMLSelectElement).value;
+    state.remoteLimit = 60;
+    renderRemoteChannelsList();
+  });
+  bar.querySelector('#remote-filter-group')?.addEventListener('change', e => {
+    state.remoteFilters.group = (e.target as HTMLSelectElement).value;
+    state.remoteLimit = 60;
+    renderRemoteChannelsList();
+  });
+  bar.querySelector('#remote-filter-sort')?.addEventListener('change', e => {
+    state.remoteFilters.sort = (e.target as HTMLSelectElement).value as typeof state.remoteFilters.sort;
+    renderRemoteChannelsList();
+  });
+  bar.querySelector('#remote-filter-favs')?.addEventListener('click', () => {
+    state.remoteFilters.favouritesOnly = !state.remoteFilters.favouritesOnly;
+    state.remoteLimit = 60;
+    renderRemoteChannelsList();
+  });
+}
+
+export function resetRemoteFilters(): void {
+  state.remoteFilters = { language: 'ALL', group: 'ALL', favouritesOnly: false, sort: 'default' };
+  state.remoteActiveCategory = 'ALL';
+  state.remoteLimit = 60;
+  const searchInput = document.getElementById('remote-search-input') as HTMLInputElement | null;
+  if (searchInput) searchInput.value = '';
+  renderRemoteChannelsList();
+}
+
 export function renderRemoteChannelsList(): void {
   const container = document.getElementById('remote-channels-render');
   const loadMoreBtn = document.getElementById('remote-load-more');
@@ -494,15 +632,31 @@ export function renderRemoteChannelsList(): void {
       matchesCat = Boolean(ch.group && ch.group.toLowerCase().includes(cat.toLowerCase()));
     }
 
-    return matchesSearch && matchesCat;
+    const filters = state.remoteFilters;
+    const matchesLanguage = filters.language === 'ALL' || ch.language === filters.language;
+    const matchesGroup = filters.group === 'ALL' || ch.group === filters.group;
+    const matchesFavourite = !filters.favouritesOnly || state.favorites.includes(ch.id);
+
+    return matchesSearch && matchesCat && matchesLanguage && matchesGroup && matchesFavourite;
   });
+
+  const sort = state.remoteFilters.sort;
+  if (sort === 'name') {
+    list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  } else if (sort === 'group') {
+    list.sort(
+      (a, b) => (a.group || '').localeCompare(b.group || '') || (a.name || '').localeCompare(b.name || '')
+    );
+  }
+
+  renderRemoteFilterBar();
 
   if (list.length === 0) {
     container.innerHTML = `
       <div class="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
         <i class="fa-solid fa-tv text-2xl text-slate-600"></i>
-        <span>No streams found matching "${query}".</span>
-        <span class="text-[10px] text-slate-600">Try checking your spelling or selecting 'All'.</span>
+        <span>No streams match the current filters.</span>
+        <button onclick="window.resetRemoteFilters()" class="mt-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[10px] text-slate-300">Clear filters</button>
       </div>`;
     if (loadMoreBtn) loadMoreBtn.classList.add('hidden');
     return;
@@ -517,50 +671,48 @@ export function renderRemoteChannelsList(): void {
     .map(ch => {
       const isFav = state.favorites.includes(ch.id);
       const isPlayingOnTv = curPlayingId && ch.id === curPlayingId;
-      const safeName = (ch.name || 'Stream Channel').replace(/'/g, "\\'");
-      const safeUrl = (ch.url || '').replace(/'/g, "\\'");
-      const safeLogo = (ch.logo || '').replace(/'/g, "\\'");
-      const safeProg = (ch.program || 'Live Broadcast').replace(/'/g, "\\'");
 
+      // Channel metadata comes from third-party playlists. It used to be spliced
+      // into inline onclick strings with only single quotes escaped, so a name
+      // containing a double quote broke out of the attribute and a crafted
+      // playlist could execute script in the remote. Identity now travels in a
+      // data attribute and the click is handled by delegation below.
       let badgeTag = ch.country || 'TV';
-      let clickHandler = `sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}' })`;
-      let iconClass = 'fa-play';
+      let action = 'tune';
 
       if (ch.type === 'vod' || (ch.url && ch.url.includes('/movie/'))) {
         badgeTag = '🎬 VOD Movie';
-        clickHandler = `window.openRemoteMovieExplorerById('${ch.id}')`;
-        iconClass = 'fa-film';
+        action = 'movie';
       } else if (ch.type === 'series' || ch.seriesId || (ch.url && ch.url.includes('/series/'))) {
         badgeTag = '🍿 TV Series';
-        clickHandler = `window.openRemoteSeriesExplorerById('${ch.id}')`;
-        iconClass = 'fa-tv';
+        action = 'series';
       }
 
       return `
-      <div onclick="${clickHandler}" class="p-2.5 rounded-xl flex items-center justify-between active:bg-slate-800 transition cursor-pointer ${
+      <div data-remote-id="${escapeAttr(ch.id)}" data-remote-action="${action}" class="p-2.5 rounded-xl flex items-center justify-between active:bg-slate-800 transition cursor-pointer ${
         isPlayingOnTv
           ? 'bg-brand-950/70 border-2 border-brand-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]'
           : 'bg-slate-900 border border-slate-800/80 hover:bg-slate-850'
       }">
         <div class="flex items-center gap-3 overflow-hidden">
-          <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
+          <img src="${escapeAttr(ch.logo || FALLBACK_LOGO)}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
           <div class="text-left overflow-hidden">
             <div class="text-xs font-semibold ${isPlayingOnTv ? 'text-brand-300' : 'text-white'} truncate flex items-center gap-1.5">
-              <span>${ch.name}</span>
+              <span>${escapeHtml(ch.name || 'Stream Channel')}</span>
               ${isPlayingOnTv ? '<span class="px-1.5 py-0.2 rounded bg-brand-500/30 text-brand-300 text-[8px] font-bold uppercase tracking-wider animate-pulse">ON TV</span>' : ''}
             </div>
-            <div class="text-[10px] text-slate-400">${badgeTag} · ${ch.group || 'Stream'}</div>
+            <div class="text-[10px] text-slate-400">${escapeHtml(badgeTag)} · ${escapeHtml(ch.group || 'Stream')}</div>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <button onclick="window.toggleRemoteFav('${ch.id}', event)" class="p-2 text-sm ${
+          <button data-remote-id="${escapeAttr(ch.id)}" data-remote-action="fav" class="p-2 text-sm ${
             isFav ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'
           } active:scale-125 transition">
-            <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+            <i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-star pointer-events-none"></i>
           </button>
-          <button onclick="event.stopPropagation(); sendRemoteCmd('TUNE_CHANNEL', { id: '${ch.id}', url: '${safeUrl}', name: '${safeName}', logo: '${safeLogo}', program: '${safeProg}', type: '${ch.type || 'live'}' })" 
+          <button data-remote-id="${escapeAttr(ch.id)}" data-remote-action="tune"
                   class="w-7 h-7 rounded-lg ${isPlayingOnTv ? 'bg-brand-500 text-white' : 'bg-brand-600/20 text-brand-400 hover:bg-brand-600 hover:text-white'} flex items-center justify-center active:scale-90 hover:scale-105 transition shadow-sm" title="Play on Quant TV">
-            <i class="fa-solid fa-play text-[10px]"></i>
+            <i class="fa-solid fa-play text-[10px] pointer-events-none"></i>
           </button>
         </div>
       </div>
@@ -586,6 +738,7 @@ export function renderRemoteChannelsList(): void {
   }
 
   container.innerHTML = html;
+  attachRemoteListDelegation(container);
 
   // Auto-infinite scroll when scrolling near bottom
   if (!container.dataset.hasScrollListener) {
@@ -920,3 +1073,5 @@ export function loadMoreRemoteChannels(): void {
 (window as any).loadMoreRemoteChannels = loadMoreRemoteChannels;
 (window as any).renderQuickChannelStrip = renderQuickChannelStrip;
 
+(window as any).renderRemoteFilterBar = renderRemoteFilterBar;
+(window as any).resetRemoteFilters = resetRemoteFilters;

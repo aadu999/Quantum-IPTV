@@ -211,7 +211,13 @@ export function showTvChannelSwitchHud(
     hud.className =
       'fixed top-6 left-6 z-[999999] bg-slate-900/95 border-2 border-indigo-500 rounded-2xl px-5 py-3.5 shadow-2xl backdrop-blur-xl flex items-center gap-3.5 transition-all duration-200 pointer-events-none opacity-0 translate-y-[-10px] scale-95';
     hud.innerHTML = `
-      <img id="tv-switch-hud-logo" src="" class="w-11 h-11 rounded-xl object-contain bg-slate-800 p-1 border border-indigo-500/40 shrink-0" onerror="this.src='${FALLBACK_LOGO}'">
+      <!--
+        FALLBACK_LOGO is an SVG data URI containing single quotes (xmlns='...'),
+        so interpolating it into a single-quoted inline handler closed the string
+        early and made the attribute a syntax error. Every other call site goes
+        through handleLogoError, which sets the fallback from JS instead.
+      -->
+      <img id="tv-switch-hud-logo" src="" class="w-11 h-11 rounded-xl object-contain bg-slate-800 p-1 border border-indigo-500/40 shrink-0" onerror="handleLogoError(this)">
       <div class="flex flex-col max-w-sm">
         <div class="flex items-center gap-2">
           <span id="tv-switch-hud-num" class="text-[11px] font-mono font-bold text-indigo-400 tracking-wider">CH 1</span>
