@@ -213,7 +213,11 @@ export function selectSeriesSeason(seasonNum: string): void {
   // Normalise the provider's episode payload once, so the grid, the quick strip
   // and next-episode autoplay all work from the same shape.
   const refs: EpisodeRef[] = episodes.map((ep: any) => {
-    const ext = ep.container_extension || 'mkv';
+    // Default to mp4, not mkv. Matroska cannot be decoded by <video> in any
+    // browser or by Android's WebView, so guessing mkv for a panel that omits
+    // container_extension produces a URL that can never play. mp4 is both
+    // playable and what most panels actually serve.
+    const ext = ep.container_extension || 'mp4';
     const info = ep.info || {};
     return {
       id: String(ep.id),

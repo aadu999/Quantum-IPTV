@@ -537,7 +537,9 @@ export function setupEventListeners(): void {
       showEngineHud(true, 0);
     });
     video.addEventListener('error', () => {
-      engine.onStreamFailed('Video playback error');
+      // Hand this to the failover ladder rather than ending the attempt. Calling
+      // onStreamFailed() here skipped every remaining rung.
+      engine.handleVideoElementError();
     });
 
     // Series continuity: resume where the viewer left off, and roll into the

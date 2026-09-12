@@ -47,6 +47,48 @@ const MAX_MEDIA_ERROR_RECOVERIES = 3;
 /** Absolute cap on in-place network retries before moving down the ladder. */
 const MAX_NETWORK_RETRIES = 2;
 
+
+/**
+ * Ladder for a single on-demand asset (a series episode or a movie).
+ *
+ * Covers the two things that actually go wrong with Xtream VOD: the request
+ * being blocked by mixed content or CORS, which the proxy fixes, and the panel
+ * serving the asset under a different container than the API reported. Panels
+ * routinely list an episode with no container_extension, or report one value and
+ * store another, so the alternates are worth trying before declaring failure.
+ */
+function buildOnDemandLadder(url: string): FailoverCandidate[] {
+  const candidates: FailoverCandidate[] = [];
+  const seen = new Set<string>();
+
+  const push = (candidateUrl: string, sourceName: string, proxied: boolean) => {
+    const targetUrl = proxied ? getProxiedUrl(candidateUrl) : candidateUrl;
+    if (seen.has(targetUrl)) return;
+    seen.add(targetUrl);
+    candidates.push({ url: candidateUrl, targetUrl, sourceName, proxied, sourceIndex: -1, score: 100 });
+  };
+
+  const direct = !shouldProxy(url);
+  if (direct) push(url, 'Direct', false);
+  push(url, 'Via Proxy', true);
+
+  // Containers the browser can actually decode, most likely first. Matroska is
+  // deliberately absent: no browser or WebView can play it in <video>, so
+  // retrying as .mkv only wastes the viewer's time.
+  const match = url.match(/^(.*)\.([A-Za-z0-9]+)(\?.*)?$/);
+  if (match) {
+    const [, base, ext, query = ''] = match;
+    for (const alt of ['mp4', 'm4v', 'mov']) {
+      if (alt.toLowerCase() === ext.toLowerCase()) continue;
+      const altUrl = `${base}.${alt}${query}`;
+      if (direct) push(altUrl, `Direct (.${alt})`, false);
+      push(altUrl, `Proxy (.${alt})`, true);
+    }
+  }
+
+  return candidates;
+}
+
 export class QuantumStreamEngine {
   public video: HTMLVideoElement;
   public hls: Hls | null = null;
@@ -70,6 +112,8 @@ export class QuantumStreamEngine {
 
   private ladder: FailoverCandidate[] = [];
   private ladderIndex = -1;
+  /** Guards against two handlers advancing the ladder for the same attempt. */
+  private lastAdvancedGeneration = -1;
   private startupTimer: any = null;
   private hasRenderedFrame = false;
   private mediaListenerCleanups: Array<() => void> = [];
@@ -263,20 +307,28 @@ export class QuantumStreamEngine {
 
     playbackMachine.startAttempt(channel, url);
 
-    this.ladder = buildFailoverLadder(channel);
+    // An episode or movie stream is self-contained: it belongs to the title the
+    // viewer picked, not to whatever channel happens to be selected in the list.
+    // Building the ladder from that channel meant a failed episode fell back to
+    // an unrelated live stream, so the viewer ended up watching something they
+    // never asked for instead of seeing the episode fail.
+    const isOnDemand = /\/(series|movie)\//i.test(url);
 
-    if (!this.ladder.some(c => c.url === url)) {
-      // A URL the channel does not own: an episode stream, a movie, anything
-      // routed through tuneToChannel. Play exactly what was asked for, and keep
-      // the channel's own sources behind it as fallback rungs.
-      this.ladder.unshift({
-        url,
-        targetUrl: shouldProxy(url) ? getProxiedUrl(url) : url,
-        sourceName: 'Requested Stream',
-        proxied: shouldProxy(url),
-        sourceIndex: -1,
-        score: 100
-      });
+    if (isOnDemand) {
+      this.ladder = buildOnDemandLadder(url);
+    } else {
+      this.ladder = buildFailoverLadder(channel);
+
+      if (!this.ladder.some(c => c.url === url)) {
+        this.ladder.unshift({
+          url,
+          targetUrl: shouldProxy(url) ? getProxiedUrl(url) : url,
+          sourceName: 'Requested Stream',
+          proxied: shouldProxy(url),
+          sourceIndex: -1,
+          score: 100
+        });
+      }
     }
 
     // Otherwise start at the healthiest rung rather than whatever order the
@@ -285,8 +337,29 @@ export class QuantumStreamEngine {
     this.playCandidate(this.ladder[0]);
   }
 
+  /**
+   * Raised by the video element's own error event.
+   *
+   * This used to terminate playback outright: a permanent listener called
+   * onStreamFailed() directly, so the very first error killed the attempt and
+   * marked the channel offline without the failover ladder ever running. For
+   * on-demand content that meant an episode never got its proxied or
+   * alternate-container retry, and simply refused to play.
+   */
+  handleVideoElementError(): void {
+    if (!this.currentSourceUrl) return;
+    this.advanceLadder('video_element_error');
+  }
+
   /** Moves to the next untried rung, or declares the channel offline. */
   private advanceLadder(reason: string): void {
+    // Several sources can observe the same failure (the element's error event,
+    // an hls.js fatal, the watchdog). Each advance starts a new generation, so a
+    // repeat call for a generation already handled is a duplicate and would skip
+    // a rung.
+    if (this.lastAdvancedGeneration === this.loadGeneration) return;
+    this.lastAdvancedGeneration = this.loadGeneration;
+
     const channel = state.filteredChannels[state.currentChannelIndex];
 
     // Attribute the failure to the source that actually failed, once. The old
