@@ -24,6 +24,22 @@ import { getProxiedUrl, shouldProxy } from '../services/proxy';
  */
 const STARTUP_TIMEOUT_MS = 12000;
 
+/**
+ * Later rungs get a shorter budget than the first.
+ *
+ * The first attempt deserves patience: it is usually the healthiest source and
+ * a slow origin is still better than a switch the viewer sees. By the third or
+ * fourth rung the evidence says this channel is in trouble, and spending a full
+ * 12 seconds on each remaining candidate means a minute of spinner before the
+ * channel is finally declared offline. Floor it well above a realistic manifest
+ * round-trip so a merely slow source is not discarded.
+ */
+const MIN_STARTUP_TIMEOUT_MS = 6000;
+
+function startupBudgetForRung(rung: number): number {
+  return Math.max(MIN_STARTUP_TIMEOUT_MS, STARTUP_TIMEOUT_MS - rung * 2000);
+}
+
 /** Absolute cap on media-error recovery attempts within one load. */
 const MAX_MEDIA_ERROR_RECOVERIES = 3;
 
@@ -425,12 +441,13 @@ export class QuantumStreamEngine {
    * happens at all.
    */
   private armStartupTimer(generation: number, sourceName: string): void {
+    const budget = startupBudgetForRung(Math.max(0, this.ladderIndex));
     this.startupTimer = setTimeout(() => {
       if (generation !== this.loadGeneration) return;
       if (this.hasRenderedFrame) return;
-      console.warn(`[QuantumStreamEngine] ${sourceName} produced no frame within ${STARTUP_TIMEOUT_MS}ms; failing over`);
+      console.warn(`[QuantumStreamEngine] ${sourceName} produced no frame within ${budget}ms; failing over`);
       this.advanceLadder('startup_timeout');
-    }, STARTUP_TIMEOUT_MS);
+    }, budget);
   }
 
   private clearStartupTimer(): void {

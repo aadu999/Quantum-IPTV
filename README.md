@@ -25,6 +25,50 @@ You can download and install the pre-built beta release directly on your Android
 
 ## ✨ Key Features in v2.1.0-beta
 
+## 🧠 Playback Resilience Core (unreleased)
+
+The streaming engine is built around a strict observe → diagnose → recover → fail over
+pipeline. Each stage is isolated, so diagnosis stays side-effect free and only the
+recovery planner is allowed to touch playback.
+
+- **Wall-clock progress detection**: playback health is judged against elapsed real time
+  rather than a fixed media-time threshold, so a stream limping along in slow motion is
+  caught instead of being reported as healthy.
+- **Classified stalls**: MSE buffer gaps, decoder freezes, decoder overload, live-edge
+  drift, bandwidth deficit and network starvation are distinguished and treated
+  differently. Bandwidth and decoder problems are acted on *while buffer remains*, so the
+  correction is invisible.
+- **Health-ranked failover ladder**: every source is scored from measured behaviour
+  (recent fragment failures, stall seconds, startup latency) and tried in both direct and
+  proxied form, with an adaptive startup budget per rung.
+- **Startup timeout**: catches the common IPTV failure where the manifest parses, no error
+  is ever raised, and no frame ever renders — the case every event-driven recovery path
+  waits on forever.
+- **Three-state circuit breaker** with exponential cooldown and single-probe recovery,
+  per endpoint and per host, persisted so a cold start does not rediscover a dead CDN.
+- **Dual-EWMA bandwidth estimator** (conservative min of a fast and slow half-life),
+  persisted across sessions and used to seed ABR so the first fragment is chosen from
+  evidence rather than a blind default.
+
+### 📡 Quant Remote over the local network
+
+The companion remote negotiates a **direct WebRTC DataChannel** with the TV, using the
+MQTT broker only to introduce the two devices. On the same Wi-Fi, commands travel
+device-to-device in single-digit milliseconds, the full catalogue syncs without the
+broker's payload caps, and provider credentials never touch the public broker. MQTT
+remains as an automatic fallback where peer-to-peer traffic is blocked.
+
+The remote also gains language, group and sort filters built from the live catalogue,
+plus a favourites-only toggle.
+
+### 🗓️ Real XMLTV guide
+
+Programme start/stop times are parsed into a per-channel index with now/next, a live
+progress bar and time remaining. Channels are matched to guide entries by `tvg-id` and
+normalised display name.
+
+---
+
 ### 📺 Immersive Android TV Experience
 - **Auto Fullscreen & Malayalam Startup**: Automatically boots directly into full-screen Live TV on the **Malayalam** language category without requiring manual mouse or keyboard interaction.
 - **Quantum Loading Animation**: Replaced blank placeholder images with a dynamic cybernetic particle spinner and pulse rings while streams buffer.
