@@ -8,7 +8,7 @@ import { QuantumStreamEngine } from './player/engine';
 import { loadM3uPlaylist, quarantineManager, sanitizeChannel } from './services/m3u';
 import { xtreamConnector, parseXtreamInput, attachXtreamAutoParse } from './services/xtream';
 import { stalkerConnector } from './services/stalker';
-import { xmltvParser, generateSyntheticEpg } from './services/xmltv';
+import { xmltvParser, renderEpgTimeline, startEpgAutoRefresh } from './services/xmltv';
 import { QuantumOfflineCache, workerEngine } from './services/cache';
 import {
   initRemoteSync,
@@ -530,7 +530,7 @@ export function setupEventListeners(): void {
       tabChannels.classList.add('bg-brand-600', 'text-white');
     } else if (view === 'epg' && tabEpg) {
       tabEpg.classList.add('bg-brand-600', 'text-white');
-      generateSyntheticEpg();
+      renderEpgTimeline();
     } else if (view === 'favs' && tabFavs) {
       tabFavs.classList.add('bg-brand-600', 'text-white');
       updateFavoritesUI();
@@ -801,6 +801,9 @@ export function initApp(): void {
     // Bring up D-Pad navigation before any of the boot work below, so a failure
     // while restoring the playlist can never leave the remote unresponsive.
     initTvNavigation();
+
+    // Keeps "now playing" and the guide progress bar current once EPG is loaded.
+    startEpgAutoRefresh();
 
     // 1. Configure Malayalam Language & Live TV category by default on startup
     const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;

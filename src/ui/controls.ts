@@ -1,6 +1,7 @@
 import { state } from '../state/store';
 import { QuantumStreamEngine } from '../player/engine';
 import { broadcastTVState } from '../services/remote';
+import { circuitBreaker } from '../player/circuit-breaker';
 
 let engineInstance: QuantumStreamEngine | null = null;
 
@@ -382,24 +383,47 @@ export function updateTimeAndSeekBar(): void {
   }
 }
 
+/**
+ * Picks the next channel that stands a real chance of playing.
+ *
+ * Walking forward and taking the first entry not currently marked offline was
+ * only half the test: it happily landed on a channel whose CDN had just failed
+ * for a dozen other channels, producing another six-second timeout and another
+ * hop. Consulting the breaker as well means the walk skips an entire dead origin
+ * in one step, and staying inside the current content type stops an auto-advance
+ * from a live channel dropping the viewer into a movie.
+ */
 export function playNextWorkingChannel(): void {
   engineInstance?.hideOfflineOverlay();
-  if (state.filteredChannels.length === 0) return;
+  const list = state.filteredChannels;
+  if (list.length === 0) return;
 
-  let nextIndex = state.currentChannelIndex;
-  let searchedCount = 0;
+  const current = list[state.currentChannelIndex];
+  const preferLive = current ? current.type !== 'series' && current.type !== 'vod' : true;
 
-  do {
-    nextIndex = (nextIndex + 1) % state.filteredChannels.length;
-    searchedCount++;
-    const ch = state.filteredChannels[nextIndex];
-    if (ch && !state.offlineChannels.has(ch.id)) {
-      (window as any).playChannel?.(nextIndex);
+  let firstNotOffline = -1;
+
+  for (let hop = 1; hop <= list.length; hop++) {
+    const index = (state.currentChannelIndex + hop) % list.length;
+    const candidate = list[index];
+    if (!candidate) continue;
+    if (state.offlineChannels.has(candidate.id)) continue;
+    if (preferLive && (candidate.type === 'series' || candidate.type === 'vod')) continue;
+
+    // Remember the first merely-untried candidate, in case nothing passes the
+    // stricter health check below.
+    if (firstNotOffline === -1) firstNotOffline = index;
+
+    if (circuitBreaker.isAvailable(candidate.url)) {
+      (window as any).playChannel?.(index, { directPlay: true });
       return;
     }
-  } while (searchedCount < state.filteredChannels.length);
+  }
 
-  (window as any).playChannel?.((state.currentChannelIndex + 1) % state.filteredChannels.length);
+  // Every reachable candidate is on a struggling origin. Trying one anyway beats
+  // leaving the viewer on a dead channel.
+  const fallback = firstNotOffline !== -1 ? firstNotOffline : (state.currentChannelIndex + 1) % list.length;
+  (window as any).playChannel?.(fallback, { directPlay: true });
 }
 
 export function adjustMobileVideoStage(): void {

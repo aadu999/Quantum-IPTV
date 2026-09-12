@@ -275,12 +275,58 @@ export function getOrGenerateRoomId(): string {
   return stored;
 }
 
+/**
+ * Set of channel ids marked unplayable, where each entry forgets itself after a
+ * cooldown.
+ *
+ * Marking was previously permanent for the life of the session: a channel that
+ * failed during a thirty-second CDN blip was excluded from zapping, from
+ * recommendations and from "play next working channel" until the app was
+ * restarted, and nothing ever retried it to discover the outage was over. Expiry
+ * means a transient failure costs one skip rather than the whole session.
+ */
+export class ExpiringChannelSet extends Set<string> {
+  private markedAt = new Map<string, number>();
+  private ttlMs: number;
+
+  constructor(ttlMs = 5 * 60 * 1000) {
+    super();
+    this.ttlMs = ttlMs;
+  }
+
+  override add(id: string): this {
+    this.markedAt.set(id, Date.now());
+    return super.add(id);
+  }
+
+  override has(id: string): boolean {
+    if (!super.has(id)) return false;
+    const at = this.markedAt.get(id) || 0;
+    if (Date.now() - at >= this.ttlMs) {
+      // Cooldown elapsed — let the channel be tried again.
+      this.delete(id);
+      return false;
+    }
+    return true;
+  }
+
+  override delete(id: string): boolean {
+    this.markedAt.delete(id);
+    return super.delete(id);
+  }
+
+  override clear(): void {
+    this.markedAt.clear();
+    super.clear();
+  }
+}
+
 export interface State {
   channels: Channel[];
   filteredChannels: Channel[];
   currentChannelIndex: number;
   favorites: string[];
-  offlineChannels: Set<string>;
+  offlineChannels: ExpiringChannelSet;
   roomId: string;
   isTheaterFullscreen: boolean;
   aspectIndex: number;
@@ -300,7 +346,7 @@ export const state: State = {
   filteredChannels: [...DEFAULT_PRESET_CHANNELS],
   currentChannelIndex: 0,
   favorites: JSON.parse(localStorage.getItem('quantum_iptv_favs') || '[]'),
-  offlineChannels: new Set<string>(),
+  offlineChannels: new ExpiringChannelSet(),
   roomId: getOrGenerateRoomId(),
   isTheaterFullscreen: false,
   aspectIndex: 0,

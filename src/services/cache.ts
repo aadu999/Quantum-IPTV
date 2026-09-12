@@ -46,30 +46,18 @@ export class QuantumOfflineCache {
     return this.dbPromise;
   }
 
-  // 2. Synchronous Fast-Hydration LocalStorage Bundle (Top 400 Channels)
+  /**
+   * Persists the catalogue for offline use.
+   *
+   * This used to also write a 450-channel bundle to localStorage under
+   * LS_SAVE_KEY, which QuantumSessionStore.saveChannels then deleted as legacy
+   * bloat on its very next call — the two helpers fought over the same key on
+   * every playlist load, costing a multi-megabyte serialise for data that was
+   * immediately discarded. The micro-bootstrap in QuantumSessionStore is the
+   * single owner of synchronous fast-hydration now; this owns IndexedDB.
+   */
   static saveBundle(channels: Channel[]): void {
-    try {
-      if (!channels || channels.length === 0) return;
-
-      // Prioritize Malayalam channels, favorites, and presets for the synchronous bootstrap
-      const malayalam = channels.filter(c => 
-        (c.language && c.language.toLowerCase() === 'malayalam') ||
-        (c.name && c.name.toLowerCase().includes('malayalam')) ||
-        (c.group && c.group.toLowerCase().includes('malayalam'))
-      );
-      const others = channels.filter(c => !malayalam.includes(c));
-      const bootstrapSet = [...malayalam, ...others].slice(0, 450);
-
-      const payload = {
-        timestamp: Date.now(),
-        channels: bootstrapSet
-      };
-      localStorage.setItem(LS_SAVE_KEY, JSON.stringify(payload));
-    } catch (e) {
-      console.warn('LocalStorage saveBundle quota warning:', e);
-    }
-
-    // Also persist entire catalog to IndexedDB asynchronously
+    if (!channels || channels.length === 0) return;
     this.saveAllChannels(channels).catch(() => {});
   }
 
@@ -84,21 +72,41 @@ export class QuantumOfflineCache {
   }
 
   // 3. Complete Catalog Storage via IndexedDB (Virtually Unlimited Capacity)
+  /**
+   * Writes the catalogue into IndexedDB, reconciling against what is already
+   * stored rather than clearing first.
+   *
+   * The previous implementation cleared the store and then re-put every row. It
+   * ran on every playlist load, and because the clear and the puts were separate
+   * awaited steps, a failure or a page close in between left the user with an
+   * empty catalogue and no offline fallback at all. Reconciling inside a single
+   * transaction means the store is never observably empty, and a run that
+   * changes nothing costs no writes.
+   */
   static async saveAllChannels(channels: Channel[]): Promise<void> {
+    if (!channels || channels.length === 0) return;
+
     try {
       const db = await this.getDB();
       const tx = db.transaction(STORE_CHANNELS, 'readwrite');
       const store = tx.objectStore(STORE_CHANNELS);
 
-      // Clear existing old items and bulk put
-      await new Promise<void>((resolve, reject) => {
-        const clearReq = store.clear();
-        clearReq.onsuccess = () => resolve();
-        clearReq.onerror = () => reject(clearReq.error);
+      const existingKeys = await new Promise<Set<string>>((resolve, reject) => {
+        const req = store.getAllKeys();
+        req.onsuccess = () => resolve(new Set((req.result || []).map(String)));
+        req.onerror = () => reject(req.error);
       });
 
-      for (let i = 0; i < channels.length; i++) {
-        store.put(channels[i]);
+      const incomingKeys = new Set<string>();
+      for (const channel of channels) {
+        if (!channel?.id) continue;
+        incomingKeys.add(String(channel.id));
+        store.put(channel);
+      }
+
+      // Drop only rows that genuinely disappeared from the catalogue.
+      for (const key of existingKeys) {
+        if (!incomingKeys.has(key)) store.delete(key);
       }
 
       await new Promise<void>((resolve, reject) => {

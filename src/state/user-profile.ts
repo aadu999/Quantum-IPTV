@@ -60,8 +60,33 @@ export class QuantumUserProfile {
 export const userProfile = new QuantumUserProfile();
 (window as any).userProfile = userProfile;
 
+/** Watch history older than this contributes nothing to recency scoring. */
+const RECENCY_HALF_LIFE_MS = 7 * 24 * 3600 * 1000;
+
 export class QuantumDecisionEngine {
-  calculateScore(channel: Channel): number {
+  /**
+   * Recency-weighted affinity per channel id, rebuilt from watch history.
+   *
+   * Raw lifetime totals are what the genre/language ranking still uses, and on
+   * their own they ossify: a fortnight of watching one channel keeps it top of
+   * the list long after the user has moved on. Decaying each history entry by
+   * age lets recent behaviour actually move the ranking.
+   */
+  private recencyByChannel(): Map<string, number> {
+    const weights = new Map<string, number>();
+    const now = Date.now();
+
+    for (const entry of userProfile.profile.watchHistory || []) {
+      if (!entry?.id) continue;
+      const age = now - (entry.timestamp || 0);
+      if (age < 0) continue;
+      const weight = Math.pow(0.5, age / RECENCY_HALF_LIFE_MS) * Math.min(600, entry.durationSec || 0);
+      weights.set(entry.id, (weights.get(entry.id) || 0) + weight);
+    }
+    return weights;
+  }
+
+  calculateScore(channel: Channel, recency?: Map<string, number>): number {
     let score = 50;
 
     const topGenres = userProfile.getTopGenres();
@@ -76,8 +101,20 @@ export class QuantumDecisionEngine {
 
     if (state.favorites && state.favorites.includes(channel.id)) score += 30;
 
+    // Recently watched, weighted by how recently and for how long. Capped so a
+    // single marathon session cannot dominate every future ranking.
+    const weights = recency || this.recencyByChannel();
+    const recencyWeight = weights.get(channel.id) || 0;
+    if (recencyWeight > 0) {
+      score += Math.min(25, Math.log10(1 + recencyWeight) * 12);
+    }
+
     if (state.offlineChannels && state.offlineChannels.has(channel.id)) score -= 100;
-    if (!circuitBreaker.isAvailable(channel.url)) score -= 80;
+
+    // Measured health, rather than a flat penalty: a source at 65 is worth
+    // recommending below a healthy one but well above a source at 10.
+    const health = circuitBreaker.getHealthScore(channel.url);
+    score -= Math.round((100 - health) * 0.6);
 
     const hour = new Date().getHours();
     if (hour >= 6 && hour < 12 && channel.group === 'News') score += 15;
@@ -87,6 +124,10 @@ export class QuantumDecisionEngine {
   }
 
   getRankedRecommendations(limit = 10): Channel[] {
+    // Computed once for the whole pass; rebuilding it per channel made this
+    // O(channels x history), which is felt on a 6,000-row catalogue.
+    const recency = this.recencyByChannel();
+
     const candidates = state.channels.filter(c => {
       const isOffline = state.offlineChannels && state.offlineChannels.has(c.id);
       const isAvailable = circuitBreaker.isAvailable(c.url);
@@ -94,7 +135,7 @@ export class QuantumDecisionEngine {
     });
 
     return candidates
-      .map(c => ({ channel: c, score: this.calculateScore(c) }))
+      .map(c => ({ channel: c, score: this.calculateScore(c, recency) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map(item => item.channel);
@@ -103,8 +144,10 @@ export class QuantumDecisionEngine {
   getRandomSurpriseChannel(): Channel {
     const recommendations = this.getRankedRecommendations(15);
     if (recommendations.length === 0) return state.channels[0];
-    const randomIndex = Math.floor(Math.random() * recommendations.length);
-    return recommendations[randomIndex];
+    // Weight the draw toward the front of the list so "surprise me" stays
+    // plausible rather than uniformly random across fifteen candidates.
+    const skewed = Math.floor(Math.pow(Math.random(), 1.7) * recommendations.length);
+    return recommendations[Math.min(skewed, recommendations.length - 1)];
   }
 }
 
