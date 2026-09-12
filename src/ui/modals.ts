@@ -7,9 +7,12 @@ import { quarantineManager } from '../services/m3u';
 import { xtreamConnector, getXtreamCredentials } from '../services/xtream';
 import { QuantumStreamEngine } from '../player/engine';
 import { broadcastTVState } from '../services/remote';
+import { seriesContext, EpisodeRef } from '../state/series-context';
+import { escapeHtml, escapeAttr } from './channels';
 
 let engineInstance: QuantumStreamEngine | null = null;
 let currentSeriesInfoCache: any = null;
+let currentSeriesChannel: Channel | null = null;
 let isSeriesExpanded = false;
 
 export function setModalEngineInstance(engine: QuantumStreamEngine): void {
@@ -115,6 +118,7 @@ export async function openSeriesExplorer(channel: Channel): Promise<void> {
   if (channel.seriesId && xtreamConnector) {
     const info = await xtreamConnector.fetchSeriesInfo(channel.seriesId, channel);
     currentSeriesInfoCache = info;
+    currentSeriesChannel = channel;
     if (info && info.episodes && Object.keys(info.episodes).length > 0) {
       renderSeriesSeasonsAndEpisodes(info);
       return;
@@ -204,25 +208,79 @@ export function selectSeriesSeason(seasonNum: string): void {
   const username = creds.username || state.lastXtreamUser || '';
   const password = creds.password || state.lastXtreamPass || '';
 
-  const gridHtml = episodes
-    .map((ep: any) => {
-      const ext = ep.container_extension || 'mkv';
-      const epUrl = `${host}/series/${username}/${password}/${ep.id}.${ext}`;
-      const title = ep.title || `Episode ${ep.episode_num || ''}`;
-      const epNumStr = `S${String(seasonNum).padStart(2, '0')}E${String(ep.episode_num || 1).padStart(2, '0')}`;
+  const seasons = Object.keys(currentSeriesInfoCache.episodes).sort((a, b) => Number(a) - Number(b));
+
+  // Normalise the provider's episode payload once, so the grid, the quick strip
+  // and next-episode autoplay all work from the same shape.
+  const refs: EpisodeRef[] = episodes.map((ep: any) => {
+    const ext = ep.container_extension || 'mkv';
+    const info = ep.info || {};
+    return {
+      id: String(ep.id),
+      title: ep.title || `Episode ${ep.episode_num || ''}`,
+      season: String(seasonNum),
+      episodeNum: Number(ep.episode_num) || 1,
+      url: `${host}/series/${username}/${password}/${ep.id}.${ext}`,
+      // Xtream exposes a per-episode still under a few different keys
+      // depending on the panel version.
+      thumb: info.movie_image || info.cover_big || ep.movie_image || undefined,
+      durationSec: Number(info.duration_secs) || parseDurationToSeconds(info.duration) || undefined,
+      plot: info.plot || info.description || undefined
+    };
+  });
+
+  seriesContext.setActive({
+    seriesId: String(currentSeriesChannel?.seriesId || currentSeriesChannel?.id || ''),
+    seriesName: currentSeriesChannel?.name || 'Series',
+    cover: currentSeriesChannel?.cover || currentSeriesChannel?.logo,
+    seasons,
+    season: String(seasonNum),
+    episodes: refs,
+    index: Math.max(0, seriesContext.current?.season === String(seasonNum) ? seriesContext.current.index : 0)
+  });
+
+  const gridHtml = refs
+    .map((ep, idx) => {
+      const epNumStr = `S${String(seasonNum).padStart(2, '0')}E${String(ep.episodeNum).padStart(2, '0')}`;
+      const resume = seriesContext.getResume(ep.id);
+      const pct = resume && resume.durationSec > 0
+        ? Math.min(100, Math.round((resume.positionSec / resume.durationSec) * 100))
+        : 0;
 
       return `
-      <div class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-xl p-2.5 flex flex-col justify-between space-y-2 transition shadow-md group">
-        <div class="flex items-start justify-between gap-1.5">
-          <div class="min-w-0 flex-1">
-            <span class="text-[11px] font-bold text-white group-hover:text-brand-300 transition line-clamp-1">${title}</span>
-            <span class="text-[9px] text-slate-400 font-mono block">${ep.info && ep.info.duration ? ep.info.duration : 'Standard Episode'}</span>
+      <div data-episode-index="${idx}" class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-xl overflow-hidden flex flex-col transition shadow-md group">
+        <div class="relative aspect-video bg-slate-900 overflow-hidden">
+          ${
+            ep.thumb
+              ? `<img src="${escapeAttr(ep.thumb)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.classList.add('hidden')" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
+              : ''
+          }
+          <!-- Sits behind the image, so a missing or broken still degrades to a
+               labelled placeholder instead of an empty box. -->
+          <div class="absolute inset-0 -z-10 flex items-center justify-center text-slate-700">
+            <i class="fa-solid fa-clapperboard text-2xl"></i>
           </div>
-          <span class="px-1.5 py-0.5 rounded bg-brand-950 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold shrink-0">${epNumStr}</span>
+          <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold">${epNumStr}</span>
+          ${
+            ep.durationSec
+              ? `<span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-slate-200 text-[9px] font-mono">${formatEpisodeDuration(ep.durationSec)}</span>`
+              : ''
+          }
+          ${
+            pct > 0
+              ? `<div class="absolute bottom-0 left-0 right-0 h-1 bg-black/60"><div class="h-full bg-brand-500" style="width:${pct}%"></div></div>`
+              : ''
+          }
         </div>
-        <button onclick="window.playEpisodeStream('${epUrl}', '${title.replace(/'/g, "\\'")}')" class="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white font-semibold text-[11px] transition flex items-center justify-center gap-1.5 border border-slate-700/60 hover:border-brand-500 shadow active:scale-95">
-          <i class="fa-solid fa-play text-[9px] text-brand-400 group-hover:text-white"></i>Play Episode
-        </button>
+        <div class="p-2.5 flex flex-col gap-2 flex-1">
+          <div class="min-w-0">
+            <span class="text-[11px] font-bold text-white group-hover:text-brand-300 transition line-clamp-1">${escapeHtml(ep.title)}</span>
+            ${ep.plot ? `<span class="text-[9px] text-slate-400 line-clamp-2 mt-0.5 block">${escapeHtml(ep.plot)}</span>` : ''}
+          </div>
+          <button data-play-episode="${idx}" class="mt-auto w-full py-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white font-semibold text-[11px] transition flex items-center justify-center gap-1.5 border border-slate-700/60 hover:border-brand-500 shadow active:scale-95">
+            <i class="fa-solid fa-play text-[9px] text-brand-400 group-hover:text-white pointer-events-none"></i>${pct > 0 ? `Resume ${pct}%` : 'Play Episode'}
+          </button>
+        </div>
       </div>
     `;
     })
@@ -231,8 +289,63 @@ export function selectSeriesSeason(seasonNum: string): void {
   const grid = document.getElementById('series-episodes-grid');
   if (grid) {
     grid.innerHTML =
-      gridHtml || `<div class="p-4 text-center text-slate-500 text-xs col-span-full">No episodes found for Season ${seasonNum}.</div>`;
+      gridHtml || `<div class="p-4 text-center text-slate-500 text-xs col-span-full">No episodes found for Season ${escapeHtml(String(seasonNum))}.</div>`;
+
+    // Delegated, so episode titles and URLs never have to be spliced into
+    // inline handler strings.
+    if (!grid.dataset.hasEpisodeDelegation) {
+      grid.dataset.hasEpisodeDelegation = 'true';
+      grid.addEventListener('click', event => {
+        const btn = (event.target as HTMLElement)?.closest('[data-play-episode]') as HTMLElement | null;
+        if (!btn) return;
+        const idx = Number(btn.getAttribute('data-play-episode'));
+        if (Number.isNaN(idx)) return;
+        playEpisodeAt(idx);
+      });
+    }
   }
+
+  (window as any).renderQuickChannelStrip?.();
+}
+
+/** Xtream reports duration as "HH:MM:SS" or plain seconds, depending on panel. */
+function parseDurationToSeconds(value: any): number {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  const parts = String(value).split(':').map(Number);
+  if (parts.some(Number.isNaN)) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
+
+function formatEpisodeDuration(sec: number): string {
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** Plays an episode of the active season by index and updates the context. */
+export function playEpisodeAt(index: number): void {
+  const ep = seriesContext.setIndex(index);
+  if (!ep) return;
+  closeSeriesExplorer();
+  playEpisodeRef(ep);
+}
+
+export function playEpisodeRef(ep: EpisodeRef): void {
+  const currentChName = document.getElementById('current-ch-name');
+  const currentChEpg = document.getElementById('current-ch-epg');
+  const ctx = seriesContext.current;
+  if (currentChName) currentChName.textContent = ep.title;
+  if (currentChEpg) {
+    currentChEpg.textContent = ctx
+      ? `${ctx.seriesName} · S${String(ep.season).padStart(2, '0')}E${String(ep.episodeNum).padStart(2, '0')}`
+      : 'TV Series Episode';
+  }
+  engineInstance?.load(ep.url);
+  (window as any).renderQuickChannelStrip?.();
+  broadcastTVState();
 }
 
 export function toggleSeriesExpandView(): void {
@@ -262,6 +375,8 @@ export function closeSeriesExplorer(): void {
 
 export function playEpisodeStream(streamUrl: string, episodeTitle = 'Episode'): void {
   closeSeriesExplorer();
+  // Played outside a season listing, so there is no episode rail to show.
+  seriesContext.clearActive();
   const currentChName = document.getElementById('current-ch-name');
   const currentChEpg = document.getElementById('current-ch-epg');
   if (currentChName) currentChName.textContent = episodeTitle;
@@ -553,6 +668,8 @@ export function copyToClipboard(text: string): void {
 (window as any).toggleSeriesExpandView = toggleSeriesExpandView;
 (window as any).selectSeriesSeason = selectSeriesSeason;
 (window as any).playEpisodeStream = playEpisodeStream;
+(window as any).playEpisodeAt = playEpisodeAt;
+(window as any).playEpisodeRef = playEpisodeRef;
 (window as any).openMovieExplorer = openMovieExplorer;
 (window as any).closeMovieExplorer = closeMovieExplorer;
 (window as any).startMoviePlayback = startMoviePlayback;

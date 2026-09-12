@@ -5,6 +5,7 @@ import { parseXtreamInput, getXtreamCredentials, xtreamConnector } from './xtrea
 import { formatTimestamp } from '../ui/controls';
 import { showAppAlert } from '../ui/dialog';
 import { QuantumLanLink, LanLinkStatus } from './lan-link';
+import { seriesContext } from '../state/series-context';
 
 // Bundled rather than loaded from a CDN: both were already package.json
 // dependencies but were being pulled over the network at runtime, so the
@@ -63,6 +64,13 @@ function initLanLink(): void {
   lanLink = new QuantumLanLink(state.isRemoteClient ? 'remote' : 'tv', {
     onMessage: data => {
       if (!data) return;
+      if (data.action === 'SYNC_RESUME') {
+        const merged = seriesContext.importResume(data.payload?.points || []);
+        if (merged > 0) {
+          console.log(`[QuantumRemote] Merged ${merged} resume point(s) from the paired device.`);
+        }
+        return;
+      }
       if (state.isRemoteClient) {
         if (data.action === 'SYNC_STATE') updateRemoteStateView(data.payload);
         else if (data.action === 'SYNC_CATALOG') handleIncomingCatalogSync(data.payload);
@@ -81,6 +89,11 @@ function initLanLink(): void {
           broadcastTVState();
           broadcastTVCatalog();
         }
+        // Trade resume points over the peer link. Competing players need an
+        // account or a cloud service (iCloud, a vendor login) to keep "continue
+        // watching" in step across devices; here it rides the local connection
+        // that already exists, so nothing leaves the house.
+        syncResumePoints();
       }
     },
     publishSignal
@@ -94,6 +107,17 @@ export function isLanLinkActive(): boolean {
 
 function announceLanPresence(): void {
   lanLink?.announce();
+}
+
+/**
+ * Pushes this device's watch positions to the paired one. Both sides send, and
+ * importResume() keeps whichever copy is newer, so the exchange converges
+ * without either device being authoritative.
+ */
+export function syncResumePoints(): void {
+  const points = seriesContext.exportResume();
+  if (points.length === 0) return;
+  lanLink?.send({ action: 'SYNC_RESUME', payload: { points } });
 }
 
 /**

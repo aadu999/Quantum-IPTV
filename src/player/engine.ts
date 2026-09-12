@@ -11,6 +11,7 @@ import { sessionManager } from '../core/session';
 import { sourceHealthTracker } from './source-health';
 import { buildFailoverLadder, FailoverCandidate } from './failover-ladder';
 import { getProxiedUrl, shouldProxy } from '../services/proxy';
+import { channelReliability } from '../state/channel-health';
 
 /**
  * How long a load may sit without producing a single rendered frame before it is
@@ -488,6 +489,9 @@ export class QuantumStreamEngine {
     if (curCh) {
       playbackMachine.transition('PLAYING');
       state.offlineChannels.delete(curCh.id);
+      // Records that this channel genuinely plays, so the list can rank it
+      // above entries that have never produced a frame.
+      channelReliability.recordPlayed(curCh.id);
     }
     try {
       (window as any).adjustMobileVideoStage?.();
@@ -508,6 +512,9 @@ export class QuantumStreamEngine {
     if (curCh) {
       playbackMachine.endAttempt('FAILED', reason);
       state.offlineChannels.add(curCh.id);
+      // Every rung of the failover ladder is spent, so this is a real failure
+      // of the channel rather than of one source.
+      channelReliability.recordFailed(curCh.id);
       this.showOfflineOverlay(curCh);
     }
     try {

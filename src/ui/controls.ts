@@ -2,6 +2,7 @@ import { state } from '../state/store';
 import { QuantumStreamEngine } from '../player/engine';
 import { broadcastTVState } from '../services/remote';
 import { circuitBreaker } from '../player/circuit-breaker';
+import { seriesContext } from '../state/series-context';
 
 let engineInstance: QuantumStreamEngine | null = null;
 
@@ -344,11 +345,94 @@ export function handleSeekBarClick(e: MouseEvent): void {
   wakeControls();
 }
 
+
+let lastResumeWriteAt = 0;
+
+/**
+ * Stores where the viewer has got to in the current episode.
+ *
+ * Throttled to roughly once every five seconds: this runs on timeupdate, which
+ * fires several times a second, and the resume map is persisted to
+ * localStorage.
+ */
+function recordResumeProgress(positionSec: number, durationSec: number): void {
+  const ctx = seriesContext.current;
+  const ep = seriesContext.currentEpisode;
+  if (!ctx || !ep) return;
+  if (!durationSec || !isFinite(durationSec) || durationSec <= 0) return;
+
+  const now = Date.now();
+  if (now - lastResumeWriteAt < 5000) return;
+  lastResumeWriteAt = now;
+
+  seriesContext.recordProgress({
+    contentId: ep.id,
+    title: ep.title,
+    seriesId: ctx.seriesId,
+    seriesName: ctx.seriesName,
+    season: ep.season,
+    episodeNum: ep.episodeNum,
+    url: ep.url,
+    thumb: ep.thumb,
+    positionSec,
+    durationSec
+  });
+}
+
+/**
+ * Seeks to a stored resume point once the stream is ready. Called on the first
+ * frame of a newly loaded episode.
+ */
+export function applyResumePosition(): void {
+  const ep = seriesContext.currentEpisode;
+  if (!ep || !engineInstance?.video) return;
+  const point = seriesContext.getResume(ep.id);
+  if (!point || point.positionSec < 30) return;
+
+  const video = engineInstance.video;
+  const seek = () => {
+    try {
+      // Guard against a stored position past the end, which would stall.
+      if (video.duration && isFinite(video.duration) && point.positionSec < video.duration - 5) {
+        video.currentTime = point.positionSec;
+        engineInstance?.showToast(`Resumed at ${formatTimestamp(point.positionSec)}`, 'info');
+      }
+    } catch {
+      /* seeking not possible yet */
+    }
+  };
+
+  if (video.readyState >= 2) seek();
+  else video.addEventListener('loadeddata', seek, { once: true });
+}
+
+/**
+ * Plays the next episode when one finishes.
+ *
+ * Every competing player treats this as standard; without it the screen simply
+ * went black at the end of an episode and the viewer had to reopen the series
+ * explorer to continue.
+ */
+export function handleEpisodeEnded(): void {
+  const ep = seriesContext.currentEpisode;
+  if (ep) seriesContext.markFinished(ep.id);
+
+  const next = seriesContext.nextEpisode;
+  if (!next) return;
+
+  const ctx = seriesContext.current;
+  if (ctx) seriesContext.setIndex(ctx.index + 1);
+  engineInstance?.showToast(`Up next: ${next.title}`, 'info');
+  (window as any).playEpisodeRef?.(next);
+}
+
 export function updateTimeAndSeekBar(): void {
   if (!engineInstance || !engineInstance.video) return;
   const video = engineInstance.video;
   const curTime = video.currentTime || 0;
   const dur = video.duration;
+
+  recordResumeProgress(curTime, dur);
 
   const timeContainer = document.getElementById('hud-time-container');
   const curLabel = document.getElementById('hud-time-current');
@@ -512,5 +596,7 @@ export function adjustMobileVideoStage(): void {
 (window as any).showEngineHud = showEngineHud;
 (window as any).isCurrentContentSeekable = isCurrentContentSeekable;
 (window as any).updateTimeAndSeekBar = updateTimeAndSeekBar;
+(window as any).applyResumePosition = applyResumePosition;
+(window as any).handleEpisodeEnded = handleEpisodeEnded;
 (window as any).state = state;
 

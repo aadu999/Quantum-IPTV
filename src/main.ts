@@ -33,6 +33,8 @@ import {
   updatePlayPauseIcons,
   showTvVolumeHud,
   updateTimeAndSeekBar,
+  applyResumePosition,
+  handleEpisodeEnded,
   adjustMobileVideoStage,
   showEngineHud
 } from './ui/controls';
@@ -536,6 +538,15 @@ export function setupEventListeners(): void {
     });
     video.addEventListener('error', () => {
       engine.onStreamFailed('Video playback error');
+    });
+
+    // Series continuity: resume where the viewer left off, and roll into the
+    // next episode when one finishes.
+    video.addEventListener('playing', () => {
+      applyResumePosition();
+    });
+    video.addEventListener('ended', () => {
+      handleEpisodeEnded();
     });
 
     let lastTimeBroadcast = 0;

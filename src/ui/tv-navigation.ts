@@ -559,6 +559,37 @@ export function isElementInteractable(el: HTMLElement): boolean {
   return true;
 }
 
+/**
+ * How far outside the viewport an element may sit and still be a navigation
+ * target. A little slack keeps the row just below the fold reachable, which is
+ * how a viewer expects "down" to work, without dragging in the whole list.
+ */
+const OFFSCREEN_TOLERANCE_PX = 160;
+
+function isWithinViewport(rect: DOMRect): boolean {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return (
+    rect.bottom > -OFFSCREEN_TOLERANCE_PX &&
+    rect.top < vh + OFFSCREEN_TOLERANCE_PX &&
+    rect.right > -OFFSCREEN_TOLERANCE_PX &&
+    rect.left < vw + OFFSCREEN_TOLERANCE_PX
+  );
+}
+
+/**
+ * A horizontally scrolling rail, such as the quick channel strip.
+ *
+ * Rails need their own handling: their cards extend far beyond the screen, and
+ * treating them as ordinary spatial candidates means left/right either picks a
+ * card the viewer cannot see or abandons the rail entirely for some unrelated
+ * control that happens to sit nearby.
+ */
+function getRailContainer(el: HTMLElement | null): HTMLElement | null {
+  if (!el) return null;
+  return el.closest('#tv-quick-channel-strip') as HTMLElement | null;
+}
+
 function getFocusableElements(): HTMLElement[] {
   const modal = getVisibleModal();
   const root: ParentNode = modal || document.body;
@@ -577,7 +608,33 @@ function getFocusableElements(): HTMLElement[] {
 
   const nodes = Array.from(root.querySelectorAll<HTMLElement>(selector));
 
-  return nodes.filter(el => isElementInteractable(el) && !el.classList.contains('channel-fav-btn'));
+  // Cull to what is actually on screen before the expensive checks.
+  //
+  // This used to evaluate every focusable element in the document -- with a
+  // large playlist rendered that is hundreds of rows, each costing a
+  // getBoundingClientRect() plus a getComputedStyle(), both of which force
+  // layout. On a low-powered TV box that is tens of milliseconds per D-pad
+  // press, and it compounds when a key is held. Worse, an element scrolled out
+  // of view still passed every test, so the search could hand focus to a card
+  // the viewer cannot see.
+  //
+  // offsetParent is a cheap first filter (null for display:none and for
+  // detached subtrees) and avoids getComputedStyle for the common case.
+  const visible: HTMLElement[] = [];
+  for (const el of nodes) {
+    if (el.classList.contains('channel-fav-btn')) continue;
+    if (!el.isConnected) continue;
+    if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    if (!isWithinViewport(rect)) continue;
+    if (!isElementInteractable(el)) continue;
+
+    visible.push(el);
+  }
+
+  return visible;
 }
 
 function getCurrentFocusedElement(): HTMLElement | null {
@@ -651,12 +708,36 @@ function navigateSpatial(dir: Direction): void {
   }
 
   const current = getCurrentFocusedElement();
-  const candidates = getFocusableElements();
 
   if (!current) {
     focusFirstInteractiveElement();
     return;
   }
+
+  // Inside a horizontal rail, left/right walk the rail in DOM order rather than
+  // by geometry. Geometry alone is unreliable here: the rail scrolls, so the
+  // neighbouring card may be clipped to zero width or sit outside the viewport,
+  // and the search would skip it or leave the rail altogether.
+  if (dir === 'left' || dir === 'right') {
+    const rail = getRailContainer(current);
+    if (rail) {
+      const cards = Array.from(rail.querySelectorAll<HTMLElement>('[data-quick-channel-idx], [data-quick-episode-idx]'));
+      const index = cards.indexOf(current);
+      if (index !== -1) {
+        const next = cards[index + (dir === 'right' ? 1 : -1)];
+        if (next) {
+          focusElement(next);
+          return;
+        }
+        // At either end of the rail: stay put rather than jumping to an
+        // unrelated control, which is what made the strip feel like it randomly
+        // lost focus mid-scroll.
+        return;
+      }
+    }
+  }
+
+  const candidates = getFocusableElements();
 
   const cRect = current.getBoundingClientRect();
   const cCenter = { x: cRect.left + cRect.width / 2, y: cRect.top + cRect.height / 2 };

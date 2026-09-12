@@ -8,6 +8,8 @@ import { xtreamConnector, getXtreamCredentials } from '../services/xtream';
 import { inferChannelLanguage } from '../services/m3u';
 import { QuantumStreamEngine } from '../player/engine';
 import { sessionManager } from '../core/session';
+import { channelReliability } from '../state/channel-health';
+import { seriesContext } from '../state/series-context';
 
 let engineInstance: QuantumStreamEngine | null = null;
 
@@ -189,6 +191,28 @@ export function filterContentType(type: string): void {
   filterChannels();
 }
 
+
+/**
+ * Stable sort placing working channels first, then flaky, then believed-dead.
+ * Array.prototype.sort is stable in every engine this targets, but the decorate
+ * step makes the tie-break explicit rather than relying on that.
+ */
+function stableSortByReliability(list: Channel[]): Channel[] {
+  let needsReorder = false;
+  const decorated = list.map((ch, index) => {
+    const tier = channelReliability.getTier(ch);
+    if (tier !== 0) needsReorder = true;
+    return { ch, tier, index };
+  });
+
+  // Nothing has a failure record: skip the sort entirely, which matters because
+  // this runs on every search keystroke over the whole catalogue.
+  if (!needsReorder) return list;
+
+  decorated.sort((a, b) => a.tier - b.tier || a.index - b.index);
+  return decorated.map(d => d.ch);
+}
+
 export function filterChannels(): void {
   const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
   const clearBtn = document.getElementById('search-clear-btn');
@@ -240,6 +264,14 @@ export function filterChannels(): void {
     return matchesType && matchesQuery && matchesRegion && matchesCategory && matchesLanguage;
   });
 
+  // Demote channels that have repeatedly failed to play.
+  //
+  // Large playlists carry a lot of permanently dead entries, and interleaved
+  // with working ones the viewer finds them one timeout at a time. Sorting is
+  // stable, so the provider's own ordering is preserved within each tier and
+  // untried channels are never demoted -- only ones with a real failure record.
+  state.filteredChannels = stableSortByReliability(state.filteredChannels);
+
   (state as any).tvLimit = 80;
   renderChannelList();
 
@@ -286,12 +318,16 @@ export function renderChannelList(): void {
       const isActive = idx === state.currentChannelIndex;
       const isFav = state.favorites.includes(ch.id);
       const isOffline = state.offlineChannels ? state.offlineChannels.has(ch.id) : false;
+      // Persisted verdict from previous tune attempts, so a channel known to be
+      // dead is labelled before the viewer wastes a timeout discovering it.
+      const tier = channelReliability.getTier(ch);
+      const reliabilityNote = channelReliability.describe(ch);
       const sourceCount = ch.sources ? ch.sources.length : 1;
 
       return `
       <div data-channel-id="${ch.id}" tabindex="0" onclick="window.playChannel(${idx})" class="p-2.5 flex items-center justify-between hover:bg-slate-800/80 cursor-pointer transition ${
         isActive ? 'bg-brand-950/60 border-l-4 border-brand-500 pl-2' : ''
-      }">
+      } ${tier === 2 && !isActive ? 'opacity-55' : ''}">
         <div class="flex items-center gap-2.5 overflow-hidden">
           <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-7 h-7 rounded object-contain bg-slate-800 p-0.5 border border-slate-700 shrink-0">
           <div class="overflow-hidden">
@@ -304,8 +340,10 @@ export function renderChannelList(): void {
                   : ''
               }
               ${
-                isOffline
-                  ? '<span class="text-[9px] px-1 py-0.2 rounded bg-rose-950/80 text-rose-400 border border-rose-800/50 font-mono">Offline</span>'
+                isOffline || tier === 2
+                  ? `<span title="${escapeAttr(reliabilityNote || 'Offline')}" class="text-[9px] px-1 py-0.2 rounded bg-rose-950/80 text-rose-400 border border-rose-800/50 font-mono"><i class="fa-solid fa-circle-xmark mr-0.5 text-[8px]"></i>Offline</span>`
+                  : tier === 1
+                  ? `<span title="${escapeAttr(reliabilityNote || 'Unreliable')}" class="text-[9px] px-1 py-0.2 rounded bg-amber-950/70 text-amber-400 border border-amber-800/50 font-mono"><i class="fa-solid fa-triangle-exclamation mr-0.5 text-[8px]"></i>Flaky</span>`
                   : ''
               }
             </div>
@@ -347,121 +385,138 @@ export function renderQuickChannelStrip(): void {
   const strip = document.getElementById('tv-quick-channel-strip');
   if (!strip || state.isRemoteClient) return;
 
-  if (state.filteredChannels.length === 0) {
+  // Remember which card had D-pad focus: the strip is re-rendered wholesale on
+  // every tune, which destroys the focused node and used to drop the viewer
+  // back to whatever focusFirstInteractiveElement() picked.
+  const focusedKey = strip.querySelector('.tv-focused')?.getAttribute('data-focus-key') || null;
+
+  const html = seriesContext.current ? buildEpisodeStrip() : buildChannelStrip();
+  if (html === null) {
     strip.innerHTML = '';
     return;
   }
-
-  const total = state.filteredChannels.length;
-  const start = Math.max(0, Math.min(total - 35, state.currentChannelIndex - 8));
-  const slice = state.filteredChannels.slice(start, start + 35);
-
-  const html = slice
-    .map((ch, relativeIdx) => {
-      const actualIndex = start + relativeIdx;
-      const isActive = actualIndex === state.currentChannelIndex;
-      const isFav = state.favorites.includes(ch.id);
-
-      return `
-        <div data-quick-channel-idx="${actualIndex}" onclick="window.playChannel(${actualIndex})" tabindex="0" class="shrink-0 w-44 p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition-all duration-150 backdrop-blur-md ${
-          isActive
-            ? 'bg-brand-600/30 border-2 border-brand-400 shadow-[0_0_15px_rgba(99,102,241,0.6)] scale-[1.03]'
-            : 'bg-slate-900/80 border border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600'
-        }">
-          <img src="${ch.logo || FALLBACK_LOGO}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded-lg object-contain bg-slate-950 p-0.5 border border-slate-700 shrink-0">
-          <div class="overflow-hidden flex-1 text-left">
-            <div class="flex items-center justify-between">
-              <span class="text-[9px] font-mono font-bold ${isActive ? 'text-brand-300' : 'text-slate-400'}">CH ${actualIndex + 1}</span>
-              ${isFav ? '<i class="fa-solid fa-star text-[8px] text-amber-400"></i>' : ''}
-            </div>
-            <div class="text-xs font-semibold text-white truncate leading-tight mt-0.5">${ch.name}</div>
-          </div>
-        </div>
-      `;
-    })
-    .join('');
-
   strip.innerHTML = html;
+  attachStripDelegation();
 
-  const activeCard = strip.querySelector(`[data-quick-channel-idx="${state.currentChannelIndex}"]`) as HTMLElement | null;
+  const restored = focusedKey
+    ? (strip.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`) as HTMLElement | null)
+    : null;
+  if (restored) {
+    restored.classList.add('tv-focused');
+    restored.focus({ preventScroll: true });
+  }
+
+  const activeCard = strip.querySelector('[data-strip-active="true"]') as HTMLElement | null;
   if (activeCard) {
     activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   }
 }
 
-export function updateLanguageDropdown(): void {
-  const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;
-  if (!languageFilter) return;
+/**
+ * While a series episode is playing the strip lists that series' episodes
+ * rather than unrelated live channels, so left/right steps through the season
+ * instead of jumping out of the programme the viewer is watching.
+ */
+function buildEpisodeStrip(): string | null {
+  const ctx = seriesContext.current;
+  if (!ctx || ctx.episodes.length === 0) return null;
 
-  const currentVal = languageFilter.value || 'Malayalam';
+  return ctx.episodes
+    .map((ep, idx) => {
+      const isActive = idx === ctx.index;
+      const resume = seriesContext.getResume(ep.id);
+      const pct = resume && resume.durationSec > 0
+        ? Math.min(100, Math.round((resume.positionSec / resume.durationSec) * 100))
+        : 0;
+      const epLabel = `S${String(ep.season).padStart(2, '0')}E${String(ep.episodeNum).padStart(2, '0')}`;
 
-  const standardLangs = ['Malayalam', 'Tamil', 'Hindi', 'Telugu', 'Kannada', 'English'];
-
-  const langCounts: Record<string, number> = {};
-  state.channels.forEach(ch => {
-    if (!ch.language) {
-      const inf = inferChannelLanguage(ch.name, ch.tvgId, ch.group);
-      if (inf) ch.language = inf;
-    }
-    if (ch.language) {
-      langCounts[ch.language] = (langCounts[ch.language] || 0) + 1;
-    }
-  });
-
-  // Ensure popular languages are present if any channel matches by group or name
-  standardLangs.forEach(sl => {
-    if (!langCounts[sl]) {
-      const matches = state.channels.filter(
-        ch =>
-          (ch.group && ch.group.toLowerCase().includes(sl.toLowerCase())) ||
-          (ch.name && ch.name.toLowerCase().includes(sl.toLowerCase()))
-      ).length;
-      if (matches > 0) langCounts[sl] = matches;
-    }
-  });
-
-  const sortedLangs = Object.keys(langCounts).sort((a, b) => langCounts[b] - langCounts[a]);
-
-  let html = `<option value="ALL">All Languages (${state.channels.length.toLocaleString()})</option>`;
-  sortedLangs.forEach(lang => {
-    const isSelected = lang.toLowerCase() === currentVal.toLowerCase() ? ' selected' : '';
-    html += `<option value="${lang}"${isSelected}>${lang} (${langCounts[lang].toLocaleString()})</option>`;
-  });
-  languageFilter.innerHTML = html;
-
-  if (currentVal) {
-    const matchedOpt = Array.from(languageFilter.options).find(
-      o => o.value.toLowerCase() === currentVal.toLowerCase()
-    );
-    if (matchedOpt) {
-      languageFilter.value = matchedOpt.value;
-    }
-  }
-
-  const labelEl = document.getElementById('label-language-filter');
-  if (labelEl) {
-    const opt = languageFilter.options[languageFilter.selectedIndex];
-    labelEl.textContent = opt ? opt.text : (currentVal || 'Malayalam');
-  }
+      return `
+        <div data-quick-episode-idx="${idx}" data-focus-key="ep:${escapeAttr(ep.id)}" ${isActive ? 'data-strip-active="true"' : ''} tabindex="0" class="shrink-0 w-48 rounded-xl overflow-hidden cursor-pointer transition-all duration-150 backdrop-blur-md ${
+          isActive
+            ? 'bg-brand-600/30 border-2 border-brand-400 shadow-[0_0_15px_rgba(99,102,241,0.6)] scale-[1.03]'
+            : 'bg-slate-900/80 border border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600'
+        }">
+          <div class="relative w-full aspect-video bg-slate-950">
+            ${ep.thumb ? `<img src="${escapeAttr(ep.thumb)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.classList.add('hidden')" class="w-full h-full object-cover">` : ''}
+            <span class="absolute top-1 left-1 px-1 py-0.2 rounded bg-black/75 text-[8px] font-mono font-bold ${isActive ? 'text-brand-300' : 'text-slate-300'}">${epLabel}</span>
+            ${pct > 0 ? `<div class="absolute bottom-0 left-0 right-0 h-0.5 bg-black/60"><div class="h-full bg-brand-500" style="width:${pct}%"></div></div>` : ''}
+          </div>
+          <div class="px-2 py-1.5 text-left">
+            <div class="text-[11px] font-semibold text-white truncate leading-tight">${escapeHtml(ep.title)}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
 }
 
-// Remote Channels List
+function buildChannelStrip(): string | null {
+  if (state.filteredChannels.length === 0) return null;
+
+  const total = state.filteredChannels.length;
+  const start = Math.max(0, Math.min(total - 35, state.currentChannelIndex - 8));
+  const slice = state.filteredChannels.slice(start, start + 35);
+
+  return slice
+    .map((ch, relativeIdx) => {
+      const actualIndex = start + relativeIdx;
+      const isActive = actualIndex === state.currentChannelIndex;
+      const isFav = state.favorites.includes(ch.id);
+      const tier = channelReliability.getTier(ch);
+
+      return `
+        <div data-quick-channel-idx="${actualIndex}" data-focus-key="ch:${escapeAttr(ch.id)}" ${isActive ? 'data-strip-active="true"' : ''} tabindex="0" class="shrink-0 w-44 p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition-all duration-150 backdrop-blur-md ${
+          isActive
+            ? 'bg-brand-600/30 border-2 border-brand-400 shadow-[0_0_15px_rgba(99,102,241,0.6)] scale-[1.03]'
+            : 'bg-slate-900/80 border border-slate-700/60 hover:bg-slate-800/80 hover:border-slate-600'
+        } ${tier === 2 && !isActive ? 'opacity-55' : ''}">
+          <img src="${escapeAttr(ch.logo || FALLBACK_LOGO)}" referrerpolicy="no-referrer" onerror="handleLogoError(this)" class="w-8 h-8 rounded-lg object-contain bg-slate-950 p-0.5 border border-slate-700 shrink-0">
+          <div class="overflow-hidden flex-1 text-left">
+            <div class="flex items-center justify-between">
+              <span class="text-[9px] font-mono font-bold ${isActive ? 'text-brand-300' : 'text-slate-400'}">CH ${actualIndex + 1}</span>
+              <span class="flex items-center gap-1">
+                ${tier === 2 ? '<i class="fa-solid fa-circle-xmark text-[8px] text-rose-500"></i>' : tier === 1 ? '<i class="fa-solid fa-triangle-exclamation text-[8px] text-amber-500"></i>' : ''}
+                ${isFav ? '<i class="fa-solid fa-star text-[8px] text-amber-400"></i>' : ''}
+              </span>
+            </div>
+            <div class="text-xs font-semibold text-white truncate leading-tight mt-0.5">${escapeHtml(ch.name)}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/** One delegated handler for both strip modes. */
+function attachStripDelegation(): void {
+  const strip = document.getElementById('tv-quick-channel-strip');
+  if (!strip || strip.dataset.hasStripDelegation) return;
+  strip.dataset.hasStripDelegation = 'true';
+
+  strip.addEventListener('click', event => {
+    const card = (event.target as HTMLElement)?.closest('[data-quick-channel-idx], [data-quick-episode-idx]') as HTMLElement | null;
+    if (!card) return;
+
+    const epIdx = card.getAttribute('data-quick-episode-idx');
+    if (epIdx !== null) {
+      (window as any).playEpisodeAt?.(Number(epIdx));
+      return;
+    }
+    const chIdx = card.getAttribute('data-quick-channel-idx');
+    if (chIdx !== null) playChannel(Number(chIdx), { directPlay: true });
+  });
+}
+
 export function escapeHtml(value: string): string {
   return String(value).replace(/[&<>"']/g, ch =>
     ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
   );
 }
 
-/** Attribute values need the same treatment plus backtick safety. */
 export function escapeAttr(value: string): string {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
-/**
- * One delegated listener for the whole list, instead of an inline handler per
- * row carrying interpolated channel metadata. Besides closing the injection hole
- * this keeps a 6,000-row render from building thousands of handler strings.
- */
 function attachRemoteListDelegation(container: HTMLElement): void {
   if (container.dataset.hasClickDelegation) return;
   container.dataset.hasClickDelegation = 'true';
@@ -503,11 +558,6 @@ function attachRemoteListDelegation(container: HTMLElement): void {
   });
 }
 
-/**
- * Builds the language, group and favourites controls from whatever the TV has
- * actually synced, so the options always reflect the real catalogue rather than
- * a fixed list written when the app only shipped Indian presets.
- */
 export function renderRemoteFilterBar(): void {
   const bar = document.getElementById('remote-filter-bar');
   if (!bar) return;
@@ -582,6 +632,62 @@ export function resetRemoteFilters(): void {
   const searchInput = document.getElementById('remote-search-input') as HTMLInputElement | null;
   if (searchInput) searchInput.value = '';
   renderRemoteChannelsList();
+}
+
+export function updateLanguageDropdown(): void {
+  const languageFilter = document.getElementById('language-filter') as HTMLSelectElement | null;
+  if (!languageFilter) return;
+
+  const currentVal = languageFilter.value || 'Malayalam';
+
+  const standardLangs = ['Malayalam', 'Tamil', 'Hindi', 'Telugu', 'Kannada', 'English'];
+
+  const langCounts: Record<string, number> = {};
+  state.channels.forEach(ch => {
+    if (!ch.language) {
+      const inf = inferChannelLanguage(ch.name, ch.tvgId, ch.group);
+      if (inf) ch.language = inf;
+    }
+    if (ch.language) {
+      langCounts[ch.language] = (langCounts[ch.language] || 0) + 1;
+    }
+  });
+
+  // Ensure popular languages are present if any channel matches by group or name
+  standardLangs.forEach(sl => {
+    if (!langCounts[sl]) {
+      const matches = state.channels.filter(
+        ch =>
+          (ch.group && ch.group.toLowerCase().includes(sl.toLowerCase())) ||
+          (ch.name && ch.name.toLowerCase().includes(sl.toLowerCase()))
+      ).length;
+      if (matches > 0) langCounts[sl] = matches;
+    }
+  });
+
+  const sortedLangs = Object.keys(langCounts).sort((a, b) => langCounts[b] - langCounts[a]);
+
+  let html = `<option value="ALL">All Languages (${state.channels.length.toLocaleString()})</option>`;
+  sortedLangs.forEach(lang => {
+    const isSelected = lang.toLowerCase() === currentVal.toLowerCase() ? ' selected' : '';
+    html += `<option value="${lang}"${isSelected}>${lang} (${langCounts[lang].toLocaleString()})</option>`;
+  });
+  languageFilter.innerHTML = html;
+
+  if (currentVal) {
+    const matchedOpt = Array.from(languageFilter.options).find(
+      o => o.value.toLowerCase() === currentVal.toLowerCase()
+    );
+    if (matchedOpt) {
+      languageFilter.value = matchedOpt.value;
+    }
+  }
+
+  const labelEl = document.getElementById('label-language-filter');
+  if (labelEl) {
+    const opt = languageFilter.options[languageFilter.selectedIndex];
+    labelEl.textContent = opt ? opt.text : (currentVal || 'Malayalam');
+  }
 }
 
 export function renderRemoteChannelsList(): void {
