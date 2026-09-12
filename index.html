@@ -599,10 +599,10 @@
         </div>
 
         <!-- Controls Row: Guaranteed never to cut off Fullscreen on any viewport -->
-        <div class="flex items-center justify-between gap-1 sm:gap-2 text-xs w-full overflow-hidden">
+        <div id="player-controls-row" class="flex items-center justify-between gap-1 sm:gap-2 text-xs w-full overflow-hidden">
           
           <!-- Left Controls: Play/Pause, Channel Step, Volume, Channel Name -->
-          <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+          <div id="player-controls-left" class="flex items-center gap-1 sm:gap-2 shrink-0">
             <button id="btn-play-pause" class="w-8 h-8 rounded-full bg-brand-600 hover:bg-brand-500 text-white flex items-center justify-center transition shadow-md shadow-brand-500/20 active:scale-90 shrink-0" title="Play/Pause (Space)">
               <i class="fa-solid fa-play ml-0.5 text-xs"></i>
             </button>
@@ -633,7 +633,7 @@
           </div>
 
           <!-- Right Controls: Subtitles, Audio, Aspect Ratio, PiP, Fullscreen (Full screen is ALWAYS visible) -->
-          <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <div id="player-controls-actions" class="flex items-center gap-1 sm:gap-1.5 shrink-0">
             <!-- Subtitles Button & Popover -->
             <div class="relative shrink-0">
               <button id="btn-subtitles" onclick="toggleSubtitlePopover(event)" class="px-1.5 sm:px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] sm:text-[11px] font-mono border border-slate-700/60 transition flex items-center gap-1" title="Subtitles / Closed Captions">

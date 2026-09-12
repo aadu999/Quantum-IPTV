@@ -129,6 +129,30 @@ button, input, select, a, .touch-target {
    keeps its proportions.
    ------------------------------------------------------------------------- */
 @media (max-width: 767px) {
+  /* The control row must wrap before its buttons are enlarged.
+     Nine 40px buttons plus gaps need roughly 400px, but every one of them is
+     shrink-0 and the row is clipped by #video-stage's overflow-hidden. Without
+     wrapping, the extra width pushed buttons off both edges -- fullscreen off
+     the right, previous-channel off the left -- and they simply vanished on a
+     phone. The row is justify-between, so the children spilled outside the
+     container while its scrollWidth still matched its width, which is why a
+     document-level overflow check did not catch it. */
+  #player-controls-row {
+    flex-wrap: wrap;
+    row-gap: 0.375rem;
+    justify-content: center;
+    overflow: visible !important;
+  }
+  #player-controls-left,
+  #player-controls-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0.375rem;
+    /* shrink-0 on the groups themselves would re-create the overflow. */
+    flex-shrink: 1 !important;
+    min-width: 0;
+  }
+
   #player-controls button,
   #btn-play-pause,
   #btn-prev-channel,
