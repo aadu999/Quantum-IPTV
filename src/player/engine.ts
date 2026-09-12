@@ -6,21 +6,56 @@ import { playbackMachine } from './playback-machine';
 import { networkEstimator } from './network-estimator';
 import { createHlsConfig } from './hls-config';
 import { QuantumStreamWatchdog } from './watchdog';
-import { getProxiedUrl, shouldProxy } from '../services/proxy';
 import { eventBus } from '../core/event-bus';
 import { sessionManager } from '../core/session';
 import { sourceHealthTracker } from './source-health';
+import { buildFailoverLadder, FailoverCandidate } from './failover-ladder';
+import { getProxiedUrl, shouldProxy } from '../services/proxy';
+
+/**
+ * How long a load may sit without producing a single rendered frame before it is
+ * abandoned.
+ *
+ * This is the failure mode IPTV hits most often and the one the engine
+ * previously had no answer for: the manifest parses, hls.js reports no error,
+ * and nothing ever plays. With no timeout the viewer stared at a spinner
+ * indefinitely, because every recovery path was driven by error events that
+ * never arrived.
+ */
+const STARTUP_TIMEOUT_MS = 12000;
+
+/** Absolute cap on media-error recovery attempts within one load. */
+const MAX_MEDIA_ERROR_RECOVERIES = 3;
+
+/** Absolute cap on in-place network retries before moving down the ladder. */
+const MAX_NETWORK_RETRIES = 2;
 
 export class QuantumStreamEngine {
   public video: HTMLVideoElement;
   public hls: Hls | null = null;
   private watchdog: QuantumStreamWatchdog;
+
   private networkErrorRetries = 0;
   private mediaErrorRetries = 0;
-  private lastMediaErrorTime = 0;
-  private isProxied = false;
   private currentTargetUrl = '';
+  private currentSourceUrl = '';
   private offlineCountdownTimer: any = null;
+
+  /**
+   * Incremented on every user-initiated load. Async callbacks capture the value
+   * current when they were registered and bail if it has moved on.
+   *
+   * Without this, zapping quickly left the previous stream's `error` and
+   * `loadeddata` listeners live: a failure from the channel the viewer had
+   * already left would trigger a failover on the channel they were now watching.
+   */
+  private loadGeneration = 0;
+
+  private ladder: FailoverCandidate[] = [];
+  private ladderIndex = -1;
+  private startupTimer: any = null;
+  private hasRenderedFrame = false;
+  private mediaListenerCleanups: Array<() => void> = [];
 
   constructor(videoElement: HTMLVideoElement) {
     this.video = videoElement;
@@ -50,8 +85,9 @@ export class QuantumStreamEngine {
           }
         },
         onFailover: (reason) => {
-          this.fallbackToNextSourceOrProxy(reason);
-        }
+          this.advanceLadder(reason);
+        },
+        getCurrentUrl: () => this.currentSourceUrl
       }
     );
   }
@@ -82,17 +118,18 @@ export class QuantumStreamEngine {
       });
 
       this.hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
-        sourceHealthTracker.recordFragment(this.currentTargetUrl, true);
+        sourceHealthTracker.recordFragment(this.currentSourceUrl, true);
         if (data && data.frag && data.frag.stats) {
           const stats = data.frag.stats;
           const loadDuration = stats.loading.end - stats.loading.start;
+          const ttfb = stats.loading.first > 0 ? stats.loading.first - stats.loading.start : undefined;
           const bytes = stats.loaded || stats.total || 0;
           if (loadDuration > 0 && bytes > 0) {
-            networkEstimator.recordSample(bytes, loadDuration);
+            networkEstimator.recordSample(bytes, loadDuration, ttfb);
             eventBus.emit('FRAG_LOADED', {
               bytes,
               durationMs: loadDuration,
-              url: this.currentTargetUrl
+              url: this.currentSourceUrl
             });
           }
         }
@@ -107,35 +144,46 @@ export class QuantumStreamEngine {
   }
 
   private handleHlsError(data: any): void {
+    // Non-fatal errors are hls.js's own retry territory, but they still say
+    // something about the source: a stream shedding fragments is degrading even
+    // while it plays, and that belongs in its health record.
     if (!data.fatal) {
-      // Non-fatal errors are routinely handled by HLS.js internal retries
+      if (data.details && String(data.details).includes('fragLoadError')) {
+        sourceHealthTracker.recordFragment(this.currentSourceUrl, false);
+      }
       return;
     }
 
     console.warn('[QuantumStreamEngine] Fatal HLS error encountered:', data.type, data.details);
     playbackMachine.transition('ERROR', { type: data.type, details: data.details });
-    sourceHealthTracker.recordFragment(this.currentTargetUrl, false);
-    eventBus.emit('BUFFER_LOW', { type: data.type, details: data.details, url: this.currentTargetUrl });
+    sourceHealthTracker.recordFragment(this.currentSourceUrl, false);
+    eventBus.emit('BUFFER_LOW', { type: data.type, details: data.details, url: this.currentSourceUrl });
 
     switch (data.type) {
       case Hls.ErrorTypes.NETWORK_ERROR:
         this.networkErrorRetries++;
-        if (this.networkErrorRetries <= 2 && this.hls) {
-          console.log(`[QuantumStreamEngine] Retrying network load (attempt ${this.networkErrorRetries})...`);
-          this.hls.startLoad();
+        if (this.networkErrorRetries <= MAX_NETWORK_RETRIES && this.hls) {
+          // Back off before retrying: an origin that just refused a request is
+          // rarely ready a few milliseconds later, and immediate retries burn
+          // the budget without giving it a chance to recover.
+          const delay = 500 * Math.pow(2, this.networkErrorRetries - 1) + Math.random() * 250;
+          const generation = this.loadGeneration;
+          console.log(`[QuantumStreamEngine] Retrying network load in ${Math.round(delay)}ms (attempt ${this.networkErrorRetries})`);
+          setTimeout(() => {
+            if (generation !== this.loadGeneration) return;
+            this.hls?.startLoad();
+          }, delay);
         } else {
-          this.fallbackToNextSourceOrProxy('network_error');
+          this.advanceLadder('network_error');
         }
         break;
 
       case Hls.ErrorTypes.MEDIA_ERROR: {
-        const now = Date.now();
-        if (now - this.lastMediaErrorTime > 10000) {
-          this.mediaErrorRetries = 0;
-        }
-        this.lastMediaErrorTime = now;
         this.mediaErrorRetries++;
 
+        // A hard cap, unlike the previous 10-second sliding window: a stream
+        // erroring every 11 seconds reset the counter each time and looped
+        // through recoverMediaError() forever without ever failing over.
         if (this.mediaErrorRetries === 1 && this.hls) {
           console.warn('[QuantumStreamEngine] Recovering media error (level 1)...');
           this.hls.recoverMediaError();
@@ -143,50 +191,141 @@ export class QuantumStreamEngine {
           console.warn('[QuantumStreamEngine] Swapping audio codec and recovering media error (level 2)...');
           this.hls.swapAudioCodec();
           this.hls.recoverMediaError();
+        } else if (this.mediaErrorRetries <= MAX_MEDIA_ERROR_RECOVERIES && this.hls) {
+          console.warn('[QuantumStreamEngine] Final media error recovery attempt...');
+          this.hls.recoverMediaError();
         } else {
           console.warn('[QuantumStreamEngine] Media error unrecoverable; triggering failover...');
-          this.fallbackToNextSourceOrProxy('media_error');
+          this.advanceLadder('media_error');
         }
         break;
       }
 
       default:
-        this.fallbackToNextSourceOrProxy('fatal_error');
+        this.advanceLadder('fatal_error');
         break;
     }
   }
 
   private handlePersistentStarvation(): void {
     console.warn('[QuantumStreamEngine] Persistent starvation detected, attempting seamless failover...');
-    this.fallbackToNextSourceOrProxy('starvation');
+    this.advanceLadder('starvation');
   }
 
+  /**
+   * Entry point for a user-initiated tune. Resets all failover state and builds
+   * a fresh ladder for the channel.
+   */
   load(url: string, isRetry = false): void {
     if (state.isRemoteClient) return;
 
-    this.currentTargetUrl = url;
-    const curCh = state.filteredChannels[state.currentChannelIndex] || null;
-    if (!isRetry) {
-      if (!sessionManager.getActiveSession() || (curCh && sessionManager.getActiveSession()?.contentId !== curCh.id)) {
-        sessionManager.startSession(
-          curCh ? curCh.id : 'unknown',
-          curCh ? curCh.name : 'Unknown Channel',
-          Date.now(),
-          { estimatedBandwidth: networkEstimator.bandwidth }
-        );
-      }
-      sessionManager.recordAttempt(url, curCh ? curCh.name : undefined, this.isProxied);
-      playbackMachine.startAttempt(curCh, url);
-      this.networkErrorRetries = 0;
-      this.mediaErrorRetries = 0;
-      this.isProxied = false;
-    }
-
-    if (!circuitBreaker.isAvailable(url)) {
-      console.warn(`[QuantumStreamEngine] Circuit Breaker OPEN for host: ${circuitBreaker.getHost(url)}. Trying fallback.`);
-      this.fallbackToNextSourceOrProxy('circuit_breaker_open');
+    if (isRetry) {
+      // Retries come from advanceLadder(), which has already positioned itself.
+      this.startAttempt(url, url, false, 'Retry');
       return;
     }
+
+    const channel = state.filteredChannels[state.currentChannelIndex] || null;
+
+    // A new tune invalidates every in-flight callback from the previous one.
+    this.loadGeneration++;
+    this.clearMediaListeners();
+    this.clearStartupTimer();
+    this.networkErrorRetries = 0;
+    this.mediaErrorRetries = 0;
+    this.hasRenderedFrame = false;
+
+    if (!sessionManager.getActiveSession() || (channel && sessionManager.getActiveSession()?.contentId !== channel.id)) {
+      sessionManager.startSession(
+        channel ? channel.id : 'unknown',
+        channel ? channel.name : 'Unknown Channel',
+        Date.now(),
+        { estimatedBandwidth: networkEstimator.bandwidth }
+      );
+    }
+
+    playbackMachine.startAttempt(channel, url);
+
+    this.ladder = buildFailoverLadder(channel);
+
+    if (!this.ladder.some(c => c.url === url)) {
+      // A URL the channel does not own: an episode stream, a movie, anything
+      // routed through tuneToChannel. Play exactly what was asked for, and keep
+      // the channel's own sources behind it as fallback rungs.
+      this.ladder.unshift({
+        url,
+        targetUrl: shouldProxy(url) ? getProxiedUrl(url) : url,
+        sourceName: 'Requested Stream',
+        proxied: shouldProxy(url),
+        sourceIndex: -1,
+        score: 100
+      });
+    }
+
+    // Otherwise start at the healthiest rung rather than whatever order the
+    // playlist happened to list the sources in.
+    this.ladderIndex = 0;
+    this.playCandidate(this.ladder[0]);
+  }
+
+  /** Moves to the next untried rung, or declares the channel offline. */
+  private advanceLadder(reason: string): void {
+    const channel = state.filteredChannels[state.currentChannelIndex];
+
+    // Attribute the failure to the source that actually failed, once. The old
+    // code recorded the same failure twice — in the fallback path and again in
+    // onStreamFailed — which made every source look twice as unreliable as it was.
+    if (this.currentSourceUrl) {
+      circuitBreaker.recordFailure(this.currentSourceUrl, reason);
+    }
+
+    const next = this.ladderIndex + 1;
+    if (!channel || next >= this.ladder.length) {
+      this.onStreamFailed(reason);
+      return;
+    }
+
+    this.ladderIndex = next;
+    const candidate = this.ladder[next];
+
+    if (candidate.sourceIndex >= 0 && channel) {
+      channel.activeSourceIndex = candidate.sourceIndex;
+    }
+
+    console.log(
+      `[QuantumStreamEngine] Failing over to ${candidate.sourceName} (rung ${next + 1}/${this.ladder.length}) for ${channel.name}`
+    );
+    eventBus.emit('SOURCE_SWITCHED', {
+      fromUrl: this.currentSourceUrl,
+      toUrl: candidate.targetUrl,
+      sourceName: candidate.sourceName,
+      reason
+    });
+
+    this.showToast(`Switching to ${candidate.sourceName}...`, 'info');
+    this.showSpinner(true, `Failing over to ${candidate.sourceName}...`);
+    this.playCandidate(candidate);
+  }
+
+  private playCandidate(candidate: FailoverCandidate): void {
+    if (!candidate) return;
+    this.startAttempt(candidate.url, candidate.targetUrl, candidate.proxied, candidate.sourceName);
+  }
+
+  private startAttempt(sourceUrl: string, targetUrl: string, proxied: boolean, sourceName: string): void {
+    this.loadGeneration++;
+    const generation = this.loadGeneration;
+
+    this.clearMediaListeners();
+    this.clearStartupTimer();
+    this.networkErrorRetries = 0;
+    this.mediaErrorRetries = 0;
+    this.hasRenderedFrame = false;
+
+    this.currentSourceUrl = sourceUrl;
+    this.currentTargetUrl = targetUrl;
+
+    sessionManager.recordAttempt(sourceUrl, sourceName, proxied);
 
     this.showSpinner(true, 'Buffering Stream...');
     playbackMachine.transition('BUFFERING');
@@ -194,107 +333,121 @@ export class QuantumStreamEngine {
       (window as any).showEngineHud?.(true, 0);
     } catch (e) {}
 
-    let targetUrl = url;
-    if (shouldProxy(url) || this.isProxied) {
-      targetUrl = getProxiedUrl(url);
-    }
+    // Restart telemetry so stall counters and recovery budgets from the previous
+    // stream do not carry into this one.
+    this.watchdog.start();
+    this.armStartupTimer(generation, sourceName);
 
     const isDirectMedia =
-      /\.(mp4|mkv|avi|mov|mp3|aac|flv)(\?.*)?$/i.test(url) ||
-      url.includes('/movie/') ||
-      url.includes('/series/');
+      /\.(mp4|mkv|avi|mov|mp3|aac|flv)(\?.*)?$/i.test(sourceUrl) ||
+      sourceUrl.includes('/movie/') ||
+      sourceUrl.includes('/series/');
 
     if (isDirectMedia) {
-      if (this.hls) {
-        this.hls.stopLoad();
-        this.hls.detachMedia();
-      }
-      if (this.video) {
-        this.video.src = targetUrl;
-        this.video.addEventListener(
-          'loadeddata',
-          () => {
-            this.showSpinner(false);
-            this.attemptAutoplay();
-          },
-          { once: true }
-        );
-        this.video.addEventListener(
-          'error',
-          () => {
-            this.fallbackToNextSourceOrProxy('direct_media_error');
-          },
-          { once: true }
-        );
-        this.attemptAutoplay();
-      }
+      this.loadDirectMedia(targetUrl, generation);
     } else if (this.hls && Hls.isSupported()) {
+      this.hls.stopLoad();
       this.hls.attachMedia(this.video);
       this.hls.loadSource(targetUrl);
     } else if (this.video && this.video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native Apple HLS (Safari / iOS)
-      this.video.src = targetUrl;
-      this.video.addEventListener(
-        'loadedmetadata',
-        () => {
-          this.showSpinner(false);
-          this.attemptAutoplay();
-        },
-        { once: true }
-      );
-      this.attemptAutoplay();
+      this.loadNativeHls(targetUrl, generation);
     } else if (this.video) {
       this.video.src = targetUrl;
       this.attemptAutoplay();
     }
   }
 
+  private loadDirectMedia(targetUrl: string, generation: number): void {
+    if (this.hls) {
+      this.hls.stopLoad();
+      this.hls.detachMedia();
+    }
+    if (!this.video) return;
+
+    this.video.src = targetUrl;
+
+    this.addMediaListener('loadeddata', () => {
+      if (generation !== this.loadGeneration) return;
+      this.showSpinner(false);
+      this.attemptAutoplay();
+    });
+
+    this.addMediaListener('error', () => {
+      // The generation check is the whole point: without it a late error from
+      // an abandoned stream fails over the channel the viewer moved to.
+      if (generation !== this.loadGeneration) return;
+      this.advanceLadder('direct_media_error');
+    });
+
+    this.attemptAutoplay();
+  }
+
+  private loadNativeHls(targetUrl: string, generation: number): void {
+    if (!this.video) return;
+    this.video.src = targetUrl;
+
+    this.addMediaListener('loadedmetadata', () => {
+      if (generation !== this.loadGeneration) return;
+      this.showSpinner(false);
+      this.attemptAutoplay();
+    });
+
+    this.addMediaListener('error', () => {
+      if (generation !== this.loadGeneration) return;
+      this.advanceLadder('native_hls_error');
+    });
+
+    this.attemptAutoplay();
+  }
+
+  /**
+   * Registers a listener and remembers how to remove it, so a load that is
+   * superseded leaves nothing behind on the shared video element.
+   */
+  private addMediaListener(type: string, handler: EventListener): void {
+    if (!this.video) return;
+    this.video.addEventListener(type, handler, { once: true });
+    this.mediaListenerCleanups.push(() => this.video?.removeEventListener(type, handler));
+  }
+
+  private clearMediaListeners(): void {
+    for (const cleanup of this.mediaListenerCleanups) {
+      try {
+        cleanup();
+      } catch (e) {}
+    }
+    this.mediaListenerCleanups = [];
+  }
+
+  /**
+   * Catches the silent-failure case: no error, no frame, no progress. Every
+   * other recovery path is reactive to an event; this one fires when nothing
+   * happens at all.
+   */
+  private armStartupTimer(generation: number, sourceName: string): void {
+    this.startupTimer = setTimeout(() => {
+      if (generation !== this.loadGeneration) return;
+      if (this.hasRenderedFrame) return;
+      console.warn(`[QuantumStreamEngine] ${sourceName} produced no frame within ${STARTUP_TIMEOUT_MS}ms; failing over`);
+      this.advanceLadder('startup_timeout');
+    }, STARTUP_TIMEOUT_MS);
+  }
+
+  private clearStartupTimer(): void {
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer);
+      this.startupTimer = null;
+    }
+  }
+
+  /** Retained for callers outside the engine that still request a manual failover. */
   fallbackToNextSourceOrProxy(reason: string): void {
-    const curCh = state.filteredChannels[state.currentChannelIndex];
-    if (!curCh) return;
-
-    // 1. In-Channel Multi-Source Failover: try secondary backup CDN/stream if available
-    if (curCh.sources && curCh.sources.length > 1) {
-      const curIndex = curCh.activeSourceIndex || 0;
-      if (curIndex < curCh.sources.length - 1) {
-        curCh.activeSourceIndex = curIndex + 1;
-        const backupSource = curCh.sources[curCh.activeSourceIndex];
-        console.log(`[QuantumStreamEngine] Failing over to Source ${curCh.activeSourceIndex + 1} (${backupSource.sourceName}) for ${curCh.name}`);
-        eventBus.emit('SOURCE_SWITCHED', {
-          fromUrl: curCh.url,
-          toUrl: backupSource.url,
-          sourceName: backupSource.sourceName,
-          reason
-        });
-        this.showToast(`Switching to backup source (${backupSource.sourceName})...`, 'info');
-        this.showSpinner(true, `Failing over to ${backupSource.sourceName}...`);
-        this.load(backupSource.url, true);
-        return;
-      }
-    }
-
-    // 2. High-Performance Local Streaming Proxy Fallback
-    if (!this.isProxied) {
-      console.log(`[QuantumStreamEngine] Activating high-performance streaming proxy for ${curCh.name}`);
-      this.isProxied = true;
-      this.networkErrorRetries = 0;
-      eventBus.emit('SOURCE_SWITCHED', {
-        fromUrl: this.currentTargetUrl || curCh.url,
-        toUrl: getProxiedUrl(this.currentTargetUrl || curCh.url),
-        sourceName: 'Quantum Streaming Proxy',
-        reason
-      });
-      this.showSpinner(true, 'Connecting via Streaming Proxy...');
-      this.load(this.currentTargetUrl || curCh.url, true);
-      return;
-    }
-
-    // 3. All sources and proxy failed
-    circuitBreaker.recordFailure(curCh.url, reason);
-    this.onStreamFailed(reason);
+    this.advanceLadder(reason);
   }
 
   onStreamPlaying(): void {
+    this.hasRenderedFrame = true;
+    this.clearStartupTimer();
     this.showSpinner(false);
     this.hideOfflineOverlay();
     this.updateHudResolution();
@@ -307,9 +460,15 @@ export class QuantumStreamEngine {
       }
     }
 
+    // Credit the source that actually played, not the channel's nominal url —
+    // otherwise a successful proxy attempt cleared the failure record of the
+    // direct source that had just failed.
+    if (this.currentSourceUrl) {
+      circuitBreaker.recordSuccess(this.currentSourceUrl, ztf || undefined);
+    }
+
     const curCh = state.filteredChannels[state.currentChannelIndex];
     if (curCh) {
-      circuitBreaker.recordSuccess(curCh.url, ztf || undefined);
       playbackMachine.transition('PLAYING');
       state.offlineChannels.delete(curCh.id);
     }
@@ -324,11 +483,12 @@ export class QuantumStreamEngine {
   }
 
   onStreamFailed(reason = 'Playback error'): void {
+    this.clearStartupTimer();
+    this.clearMediaListeners();
     this.showSpinner(false);
     const curCh = state.filteredChannels[state.currentChannelIndex];
     sessionManager.endSession('FAILED');
     if (curCh) {
-      circuitBreaker.recordFailure(curCh.url, reason);
       playbackMachine.endAttempt('FAILED', reason);
       state.offlineChannels.add(curCh.id);
       this.showOfflineOverlay(curCh);
@@ -396,7 +556,9 @@ export class QuantumStreamEngine {
     if (show) {
       if (spinnerMessage) spinnerMessage.textContent = message;
       if (spinnerChannel) {
-        const cur = state.channels[state.currentChannelIndex];
+        // currentChannelIndex indexes filteredChannels; reading it out of
+        // state.channels showed an unrelated channel's name on the spinner.
+        const cur = state.filteredChannels[state.currentChannelIndex];
         spinnerChannel.textContent = cur ? cur.name : '';
       }
       videoSpinner.classList.remove('hidden');
@@ -426,7 +588,11 @@ export class QuantumStreamEngine {
         : type === 'error'
         ? 'fa-circle-exclamation text-rose-400'
         : 'fa-circle-info text-brand-400'
-    }"></i> <span>${message}</span>`;
+    }"></i> <span></span>`;
+    // Channel and source names come from third-party playlists; inserting them
+    // as text keeps a crafted name from injecting markup into the page.
+    const label = toast.querySelector('span');
+    if (label) label.textContent = message;
     document.body.appendChild(toast);
     requestAnimationFrame(() => {
       toast.classList.remove('translate-y-[-10px]', 'opacity-0');
@@ -494,7 +660,7 @@ export class QuantumStreamEngine {
         subHtml += `<button onclick="window.selectSubtitleTrack(${idx})" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${
           isSelected ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'
         } text-xs flex items-center justify-between">
-          <span>${tr.name || tr.lang || 'Track ' + (idx + 1)}</span>
+          <span>${escapeHtml(tr.name || tr.lang || 'Track ' + (idx + 1))}</span>
           ${isSelected ? '<i class="fa-solid fa-check text-brand-400"></i>' : ''}
         </button>`;
       });
@@ -512,11 +678,18 @@ export class QuantumStreamEngine {
         audioHtml += `<button onclick="window.selectAudioTrack(${idx})" class="w-full text-left px-2 py-1 rounded hover:bg-slate-800 ${
           isSelected ? 'text-brand-400 font-bold bg-slate-800/60' : 'text-slate-300'
         } text-xs flex items-center justify-between">
-          <span>${tr.name || tr.lang || 'Audio ' + (idx + 1)}</span>
+          <span>${escapeHtml(tr.name || tr.lang || 'Audio ' + (idx + 1))}</span>
           ${isSelected ? '<i class="fa-solid fa-check text-brand-400"></i>' : ''}
         </button>`;
       });
     }
     audioList.innerHTML = audioHtml;
   }
+}
+
+/** Track names originate in the manifest, so they are untrusted markup. */
+function escapeHtml(value: string): string {
+  return String(value).replace(/[&<>"']/g, ch =>
+    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+  );
 }
