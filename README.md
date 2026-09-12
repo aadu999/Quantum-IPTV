@@ -84,7 +84,9 @@ normalised display name.
 - **Dedicated Seek Focus**: Video timeline seeking is restricted to intentional seekbar selection, avoiding accidental skipping during channel browsing.
 
 ### ⚡ Offline Styling & Zero-FOUT
-- **Local Tailwind CSS Engine**: Fully self-contained 48KB offline stylesheet bundle. No external CDN script dependencies, eliminating the "raw HTML without styles" flash during boot.
+- **Local Tailwind CSS Engine**: Self-contained offline stylesheet bundle, eliminating the "raw HTML without styles" flash during boot.
+- **Bundled icons, MQTT and QR**: Font Awesome, `mqtt` and `qrcode` are compiled into the bundle rather than fetched from a CDN at runtime. Previously, an unreachable CDN left every icon-only player button collapsed to a ~14×10px target and silently disabled the companion remote. The pairing QR is now rendered on-device instead of being requested from a third-party image service.
+- **Remaining network dependency**: web fonts still load from Google Fonts. That degrades gracefully to system fonts rather than breaking layout, but it is the one external asset left.
 - **Instant Dark Theme**: Hard-coded dark boot palette (`#030712`) and native system splash integration.
 
 ### 🌐 Advanced Stream & Playlist Protocols

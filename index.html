@@ -17,14 +17,13 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   
   <!-- FontAwesome Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Font Awesome is bundled via src/index.css; see the note there. -->
+
   
   <!-- Local Bundled Offline CSS (Zero FOUT, Zero CDN latency) -->
   <link rel="stylesheet" href="/src/index.css">
   
-  <!-- Non-blocking remote companion scripts -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" async></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.15.2/mqtt.min.js" async></script>
+  <!-- mqtt and qrcode are bundled from node_modules; see src/services/remote.ts -->
 
   <script>
     // Immediate check if opened as remote controller
@@ -99,7 +98,18 @@
       inset: 0 !important;
       z-index: 45 !important;
       width: 100vw !important;
+      /* 100vh on mobile is the viewport with the URL bar *hidden*, so a fixed
+         element sized to it overflows the visible area and pushes the controls
+         off-screen until the user scrolls. dvh tracks the actual visible
+         viewport; vh stays as the fallback for older engines. */
       height: 100vh !important;
+      height: 100dvh !important;
+      /* The mobile docked layout sets an inline max-height (a fraction of the
+         viewport) on this same element. `height` alone does not beat it --
+         max-height clamps whatever height resolves to -- so it must be
+         neutralised explicitly or "fullscreen" renders as a band at the top. */
+      max-height: none !important;
+      min-height: 0 !important;
       background: #000 !important;
     }
 
@@ -207,7 +217,21 @@
       z-index: 40 !important;
       background: linear-gradient(to top, rgba(2, 6, 23, 0.95) 0%, rgba(2, 6, 23, 0.7) 60%, transparent 100%) !important;
       border-top: none !important;
-      padding-bottom: 1.5rem !important;
+      /* The page declares viewport-fit=cover, so on a notched phone the bottom
+         of the viewport sits under the home indicator. Without the inset the
+         seek bar and buttons land beneath it and are awkward or impossible to
+         hit. Same for the left/right insets in landscape, which is the
+         orientation most people watch in. */
+      padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)) !important;
+      padding-left: calc(0.5rem + env(safe-area-inset-left, 0px)) !important;
+      padding-right: calc(0.5rem + env(safe-area-inset-right, 0px)) !important;
+    }
+
+    /* Keep the exit affordance clear of the notch / camera cutout. */
+    .theater-fullscreen #exit-theater-btn,
+    #video-stage:fullscreen #exit-theater-btn {
+      top: calc(1rem + env(safe-area-inset-top, 0px)) !important;
+      right: calc(1rem + env(safe-area-inset-right, 0px)) !important;
     }
 
     .theater-fullscreen #tv-quick-channel-strip-container {

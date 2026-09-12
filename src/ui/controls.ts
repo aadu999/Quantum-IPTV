@@ -88,6 +88,10 @@ export function toggleFullscreenMode(forceState?: boolean): void {
     videoStage.classList.add('theater-fullscreen');
     if (exitTheaterBtn) exitTheaterBtn.classList.remove('hidden');
 
+    // Strip the mobile aspect-ratio clamp immediately; without this the stage
+    // keeps the inline height it had while docked.
+    adjustMobileVideoStage();
+
     try {
       (window as any).AndroidTvNative?.setImmersiveFullscreen?.(true);
     } catch (e) {}
@@ -112,6 +116,9 @@ export function toggleFullscreenMode(forceState?: boolean): void {
     videoStage.classList.remove('fullscreen-idle');
     if (controlsIdleTimer) clearTimeout(controlsIdleTimer);
     if (exitTheaterBtn) exitTheaterBtn.classList.add('hidden');
+
+    // Restore the docked mobile layout, which the fullscreen branch cleared.
+    adjustMobileVideoStage();
 
     try {
       (window as any).AndroidTvNative?.setImmersiveFullscreen?.(false);
@@ -426,19 +433,41 @@ export function playNextWorkingChannel(): void {
   (window as any).playChannel?.(fallback, { directPlay: true });
 }
 
+/** Drops every inline sizing override so the stylesheet alone decides the size. */
+function clearStageSizing(stage: HTMLElement, video: HTMLVideoElement): void {
+  stage.style.height = '';
+  stage.style.minHeight = '';
+  stage.style.maxHeight = '';
+  stage.style.aspectRatio = '';
+  video.style.height = '';
+  video.style.width = '';
+}
+
 export function adjustMobileVideoStage(): void {
   const video = document.getElementById('video-player') as HTMLVideoElement | null;
   const stage = document.getElementById('video-stage');
   if (!video || !stage) return;
 
+  // In theater mode the stage must fill the screen, so none of the inline
+  // sizing below may survive.
+  //
+  // This is what limited mobile fullscreen to a band across the top: the
+  // function writes an inline max-height capped at 45% of the viewport, and
+  // .theater-fullscreen only overrides `height`. An inline max-height has
+  // nothing competing with it, so it clamped the "fullscreen" stage to 45% of
+  // the screen. It reapplied on every resize and every `playing` event, so even
+  // a stage that started correct was clamped moments later.
+  // isFullscreenActive() rather than the app's own flag alone, so the clamp also
+  // stays off when the browser's Fullscreen API is driving (a native control, or
+  // the user pressing F11 / the system gesture).
+  if (isFullscreenActive()) {
+    clearStageSizing(stage, video);
+    return;
+  }
+
   const isMobile = window.innerWidth < 768;
   if (!isMobile) {
-    stage.style.height = '';
-    stage.style.minHeight = '';
-    stage.style.maxHeight = '';
-    stage.style.aspectRatio = '';
-    video.style.height = '';
-    video.style.width = '';
+    clearStageSizing(stage, video);
     return;
   }
 

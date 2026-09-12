@@ -6,8 +6,11 @@ import { formatTimestamp } from '../ui/controls';
 import { showAppAlert } from '../ui/dialog';
 import { QuantumLanLink, LanLinkStatus } from './lan-link';
 
-declare const mqtt: any;
-declare const QRCode: any;
+// Bundled rather than loaded from a CDN: both were already package.json
+// dependencies but were being pulled over the network at runtime, so the
+// companion remote silently did nothing whenever the CDN was unreachable.
+import mqtt from 'mqtt';
+import QRCode from 'qrcode';
 
 let mqttClient: any = null;
 let lanLink: QuantumLanLink | null = null;
@@ -878,26 +881,24 @@ export function openRemotePairingModal(): void {
   const qrContainer = document.getElementById('qrcode-container');
   if (qrContainer) {
     qrContainer.innerHTML = '';
-    try {
-      if (typeof QRCode !== 'undefined') {
-        new QRCode(qrContainer, {
-          text: remoteUrl,
-          width: 170,
-          height: 170,
-          colorDark: '#0f172a',
-          colorLight: '#ffffff',
-          correctLevel: QRCode.CorrectLevel.M
-        });
-      } else {
-        qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=${encodeURIComponent(
-          remoteUrl
-        )}" alt="QR Code" class="rounded">`;
-      }
-    } catch {
-      qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=${encodeURIComponent(
-        remoteUrl
-      )}" alt="QR Code" class="rounded">`;
-    }
+    // Rendered locally by the bundled `qrcode` package. This used to depend on a
+    // CDN script, and fell back to fetching the QR image from a third-party web
+    // service -- which both leaks the pairing URL to that service and fails
+    // exactly when it is needed most: a TV with no usable internet, pairing a
+    // phone over the local network.
+    const canvas = document.createElement('canvas');
+    canvas.className = 'rounded';
+    qrContainer.appendChild(canvas);
+
+    QRCode.toCanvas(canvas, remoteUrl, {
+      width: 170,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#0f172a', light: '#ffffff' }
+    }).catch((err: any) => {
+      console.warn('[QuantumRemote] QR render failed:', err?.message || err);
+      qrContainer.textContent = remoteUrl;
+    });
   }
 }
 

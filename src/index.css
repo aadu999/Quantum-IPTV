@@ -1,3 +1,11 @@
+/* Font Awesome is bundled rather than pulled from a CDN.
+   Every control in the player chrome is icon-only, so when the CDN is
+   unreachable -- an offline TV, a restricted network, a captive portal -- those
+   buttons collapse to their padding and become roughly 14x10px targets that are
+   effectively unusable. Bundling also makes good on the README's claim of no
+   external CDN dependencies, and costs ~268KB of webfonts. */
+@import '@fortawesome/fontawesome-free/css/all.min.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -41,12 +49,19 @@ button, input, select, a, .touch-target {
 }
 
 /* CSS Theater Fullscreen Mode */
+/* Kept in step with the copy in index.html's inline <style>, which exists so
+   theater mode renders correctly before the bundled stylesheet loads. */
 .theater-fullscreen {
   position: fixed !important;
   inset: 0 !important;
   z-index: 45 !important;
   width: 100vw !important;
   height: 100vh !important;
+  height: 100dvh !important;
+  /* Neutralises the inline max-height the mobile docked layout sets on this
+     element; without it fullscreen is clamped to a band across the top. */
+  max-height: none !important;
+  min-height: 0 !important;
   background: #000 !important;
 }
 
@@ -98,4 +113,108 @@ button, input, select, a, .touch-target {
   transform: scale(1.2) !important;
   transition: transform 0.12s ease-out !important;
   z-index: 35 !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Touch target sizing (phones only)
+
+   Measured on a 375x667 viewport, several controls were well under the ~44px
+   minimum that touch guidelines call for: the icon-only player buttons came out
+   around 28px, the content-type pills 19px, the favourite stars 12px, and the
+   seek bar just 6px tall -- hard to hit and harder to scrub accurately.
+
+   Scoped to max-width:767px, matching the breakpoint adjustMobileVideoStage()
+   already uses, so the TV and desktop layouts are untouched. Hit areas are grown
+   with padding and min-height rather than by scaling the visuals, so the design
+   keeps its proportions.
+   ------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  #player-controls button,
+  #btn-play-pause,
+  #btn-prev-channel,
+  #btn-next-channel,
+  #btn-mute,
+  #btn-aspect,
+  #btn-subtitles,
+  #btn-audio-tracks,
+  #btn-player-remote,
+  #btn-fullscreen {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  /* The seek bar's own box becomes tall enough to grab, while the visible track
+     stays slim. An absolutely-positioned ::after overlay was tried first and did
+     not work: later siblings in #player-controls paint above it, so hit tests
+     12px off-centre landed on the controls bar rather than the scrubber. Growing
+     the element itself is what actually makes the area hittable. */
+  #seek-bar-container {
+    position: relative;
+    height: 26px !important;
+    background-color: transparent !important;
+    border-radius: 0 !important;
+  }
+  /* The track the user sees, drawn at the original thickness. */
+  #seek-bar-container::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 6px;
+    transform: translateY(-50%);
+    background-color: rgb(30 41 59);
+    border-radius: 9999px;
+  }
+  /* The fill layers are h-full, so they must be re-centred to match. */
+  #progress-buffer,
+  #progress-played {
+    height: 6px !important;
+    top: 50% !important;
+    transform: translateY(-50%);
+  }
+  /* The handle is revealed on hover, which touch devices do not have, leaving
+     the scrub position invisible on a phone. */
+  #seek-handle {
+    opacity: 1 !important;
+  }
+
+  /* Content-type filter pills. Short labels such as "All" stay narrow without
+     an explicit minimum. */
+  [id^='pill-type-'] {
+    min-height: 32px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Header shortcut to the companion remote. */
+  #btn-open-remote-modal {
+    min-height: 40px;
+  }
+
+  /* Favourite stars on channel rows. */
+  .channel-fav-btn {
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Primary view tabs. */
+  #tab-btn-channels,
+  #tab-btn-epg,
+  #tab-btn-favs,
+  #tab-btn-remote {
+    min-height: 40px;
+  }
+
+  /* Provider / region / language / category pickers. */
+  #btn-region-picker,
+  #btn-language-picker,
+  #btn-category-picker {
+    min-height: 40px;
+  }
 }

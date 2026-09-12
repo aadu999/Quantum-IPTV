@@ -27,6 +27,7 @@
     "@capacitor/android": "^8.5.1",
     "@capacitor/cli": "^7.6.9",
     "@capacitor/core": "^8.5.1",
+    "@fortawesome/fontawesome-free": "^7.3.1",
     "hls.js": "^1.5.8",
     "mqtt": "^5.15.2",
     "qrcode": "^1.5.4"

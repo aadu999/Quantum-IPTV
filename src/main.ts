@@ -708,6 +708,20 @@ export function setupEventListeners(): void {
   });
 
   window.addEventListener('resize', adjustMobileVideoStage);
+
+  // Rotating the device is the usual way into landscape viewing, and several
+  // mobile browsers report stale dimensions if measured during the event
+  // itself, so re-measure once the new layout has settled. visualViewport
+  // additionally covers the URL bar sliding in and out, which changes the
+  // usable height without firing a window resize on iOS.
+  window.addEventListener('orientationchange', () => {
+    adjustMobileVideoStage();
+    setTimeout(adjustMobileVideoStage, 250);
+  });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', adjustMobileVideoStage);
+  }
 }
 
 // Global App Initialization
