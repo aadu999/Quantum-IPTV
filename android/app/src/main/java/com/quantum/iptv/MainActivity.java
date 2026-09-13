@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.PictureInPictureParams;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.media.AudioManager;
@@ -75,6 +76,23 @@ public class MainActivity extends BridgeActivity {
             }));
         }
         return lanRemoteServer.start(pairingSecret);
+    }
+
+    /** Best-guess MIME type from a stream URL's extension. */
+    private static String mimeForUrl(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        int q = lower.indexOf('?');
+        if (q >= 0) lower = lower.substring(0, q);
+        if (lower.endsWith(".mkv")) return "video/x-matroska";
+        if (lower.endsWith(".avi")) return "video/x-msvideo";
+        if (lower.endsWith(".mp4") || lower.endsWith(".m4v")) return "video/mp4";
+        if (lower.endsWith(".mov")) return "video/quicktime";
+        if (lower.endsWith(".ts") || lower.endsWith(".m2ts")) return "video/mp2t";
+        if (lower.endsWith(".m3u8")) return "application/x-mpegURL";
+        if (lower.endsWith(".webm")) return "video/webm";
+        if (lower.endsWith(".flv")) return "video/x-flv";
+        if (lower.endsWith(".wmv")) return "video/x-ms-wmv";
+        return "video/*";
     }
 
     /** Quotes arbitrary text as a JavaScript string literal. */
@@ -240,6 +258,40 @@ public class MainActivity extends BridgeActivity {
          * whether to swallow a key, and evaluateJavascript() cannot answer in
          * time, so the web layer publishes the set up front instead.
          */
+        /**
+         * Hands a stream to whatever app on the device can play it.
+         *
+         * Providers publish a great deal of Matroska, which no WebView can
+         * decode however good the codec inside is -- on one real account 84% of
+         * series episodes were .mkv. Those titles are not broken, they are
+         * simply not playable *here*; VLC or MX Player handle them without
+         * complaint. Passing the stream out is the difference between a dead
+         * catalogue entry and a watchable episode.
+         *
+         * @return false when nothing on the device offers to handle it, so the
+         *         web layer can say so rather than appearing to do nothing.
+         */
+        @JavascriptInterface
+        public boolean openInExternalPlayer(String url, String title) {
+            if (url == null || url.isEmpty()) return false;
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                // A concrete type gets the intent in front of video players;
+                // several ignore a bare ACTION_VIEW on an unknown extension.
+                intent.setDataAndType(Uri.parse(url), mimeForUrl(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                intent.putExtra("title", title == null ? "" : title);
+                // The extras MX Player and VLC read for a display title.
+                intent.putExtra("secure_uri", true);
+
+                if (intent.resolveActivity(getPackageManager()) == null) return false;
+                startActivity(intent);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
         @JavascriptInterface
         public void setClaimedTvKeyCodes(String csv) {
             Set<Integer> next = new HashSet<>();

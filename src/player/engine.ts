@@ -13,6 +13,7 @@ import { buildFailoverLadder, FailoverCandidate } from './failover-ladder';
 import { getProxiedUrl, shouldProxy } from '../services/proxy';
 import { channelReliability } from '../state/channel-health';
 import { playbackDiagnostics } from './diagnostics';
+import { containerOf, isUnplayableContainer } from './container-support';
 import { seriesContext } from '../state/series-context';
 
 /**
@@ -336,6 +337,35 @@ export class QuantumStreamEngine {
     const isOnDemand = /\/(series|movie)\//i.test(url);
     this.currentIsOnDemand = isOnDemand;
 
+    // A container the element cannot demux will not become playable by being
+    // requested four different ways. Deciding here turns twenty seconds of
+    // spinner-then-failure into an immediate, accurate answer -- and on Android,
+    // into the title actually playing, in an app that can decode it.
+    //
+    // On-demand only. Live streams go through hls.js, which demuxes containers
+    // the element cannot open by itself, so judging them by extension here would
+    // strand the whole live catalogue.
+    if (isOnDemand && isUnplayableContainer(containerOf(url))) {
+      this.currentSourceUrl = url;
+      this.currentTargetUrl = url;
+      playbackDiagnostics.recordRung({
+        sourceName: `Unsupported container (.${containerOf(url)})`,
+        url,
+        proxied: false,
+        reason: 'container_not_decodable'
+      });
+
+      if (this.handOffToExternalPlayer(url, episode?.title || channel?.name || 'this title')) {
+        playbackDiagnostics.end('PLAYING');
+        return;
+      }
+
+      this.showSpinner(false);
+      playbackDiagnostics.end('FAILED');
+      this.showOfflineOverlay(channel);
+      return;
+    }
+
     if (isOnDemand) {
       this.ladder = buildOnDemandLadder(url);
     } else {
@@ -483,26 +513,48 @@ export class QuantumStreamEngine {
     if (this.probesThisAttempt >= MAX_PROBES_PER_ATTEMPT) return;
     this.probesThisAttempt++;
 
-    const annotate = (patch: { httpStatus?: number; httpNote?: string }) =>
+    const annotate = (patch: { httpStatus?: number; httpNote?: string; servedMedia?: boolean }) =>
       playbackDiagnostics.annotateRung(rungId, patch);
+
+    /**
+     * Records what the origin returned, and whether it was actually media.
+     *
+     * A status code alone is not enough. Asked for a container it does not hold,
+     * a real Xtream panel answers `200 OK` with `text/html` and an empty body
+     * rather than a 404 -- so the speculative .mp4/.m4v/.mov rungs all came back
+     * "200" and the diagnosis concluded the provider had served the file and the
+     * device could not decode it, burying the one useful fact: the title is
+     * Matroska and was never going to play.
+     */
+    const record = (resp: Response) => {
+      const type = resp.headers.get('content-type') || '';
+      const length = Number(resp.headers.get('content-length') || '0');
+      const isMedia = /^(video|audio|application\/(octet-stream|vnd\.apple\.mpegurl|x-mpegurl|dash\+xml))/i.test(type);
+      const emptyBody = resp.status === 200 && length === 0 && !/^video|^audio/i.test(type);
+      annotate({
+        httpStatus: resp.status,
+        httpNote: emptyBody ? `${type || 'no content-type'} (empty)` : type || undefined,
+        servedMedia: resp.ok && isMedia && !emptyBody
+      });
+    };
 
     const rangedGet = () =>
       fetch(targetUrl, { method: 'GET', headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(6000) })
-        .then(resp => annotate({ httpStatus: resp.status, httpNote: resp.headers.get('content-type') || undefined }))
-        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed' }));
+        .then(record)
+        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed', servedMedia: false }));
 
     try {
       fetch(targetUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
         .then(resp => {
           // 405/501 mean the panel refuses HEAD, not that the asset is missing.
           if (resp.status === 405 || resp.status === 501) return rangedGet();
-          annotate({ httpStatus: resp.status, httpNote: resp.headers.get('content-type') || undefined });
+          record(resp);
         })
         // A network-level rejection is not evidence that HEAD is unsupported,
         // and retrying with a GET would spend another connection on an account
         // that may only allow one -- manufacturing the very 403 that explain()
         // would then report as bad credentials.
-        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed' }));
+        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed', servedMedia: false }));
     } catch {
       /* fetch unavailable */
     }
@@ -823,6 +875,23 @@ export class QuantumStreamEngine {
     if (!hudRes || !this.video) return;
     if (this.video.videoWidth) {
       hudRes.textContent = `${this.video.videoHeight}p`;
+    }
+  }
+
+  /**
+   * Asks the Android app to open a stream in a player that can decode it.
+   *
+   * @returns false on the web, or when no installed app offers to handle it.
+   */
+  private handOffToExternalPlayer(url: string, title: string): boolean {
+    const native = (window as any).AndroidTvNative;
+    if (!native || typeof native.openInExternalPlayer !== 'function') return false;
+    try {
+      if (!native.openInExternalPlayer(url, title)) return false;
+      this.showToast(`Opening "${title}" in an external player…`, 'info');
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 

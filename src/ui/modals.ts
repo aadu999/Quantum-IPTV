@@ -8,6 +8,7 @@ import { xtreamConnector, getXtreamCredentials } from '../services/xtream';
 import { QuantumStreamEngine } from '../player/engine';
 import { broadcastTVState } from '../services/remote';
 import { seriesContext, EpisodeRef } from '../state/series-context';
+import { unplayableBadge, describeUnplayable } from '../player/container-support';
 import { escapeHtml, escapeAttr } from './channels';
 
 let engineInstance: QuantumStreamEngine | null = null;
@@ -270,6 +271,14 @@ export function selectSeriesSeason(seasonNum: string): void {
               : ''
           }
           <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold">${epNumStr}</span>
+          ${
+            // Said before the viewer commits to it. A Matroska episode cannot
+            // play in the built-in player, and letting it be tapped only to fail
+            // twenty seconds later is the worst of both worlds.
+            unplayableBadge(ep.url)
+              ? `<span class="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-amber-950/90 text-amber-300 border border-amber-700/60 text-[9px] font-mono font-bold" title="${escapeAttr(describeUnplayable(ep.url))}">${escapeAttr(unplayableBadge(ep.url))}</span>`
+              : ''
+          }
           ${
             ep.durationSec
               ? `<span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-slate-200 text-[9px] font-mono">${formatEpisodeDuration(ep.durationSec)}</span>`
