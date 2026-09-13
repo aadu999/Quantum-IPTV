@@ -5,6 +5,15 @@ import { parseXtreamInput, getXtreamCredentials, xtreamConnector } from './xtrea
 import { formatTimestamp } from '../ui/controls';
 import { showAppAlert } from '../ui/dialog';
 import { QuantumLanLink, LanLinkStatus } from './lan-link';
+import {
+  startTvLanServer,
+  getTvLanServerUrl,
+  publishTvLanTopic,
+  isServedByTv,
+  isLanDirectActive,
+  startRemoteLanClient,
+  sendLanCommand
+} from './lan-server';
 import { seriesContext } from '../state/series-context';
 
 // Bundled rather than loaded from a CDN: both were already package.json
@@ -119,6 +128,7 @@ function announceLanPresence(): void {
 export function syncResumePoints(): void {
   const points = seriesContext.exportResume();
   if (points.length === 0) return;
+  if (publishTvLanTopic('resume', { points })) return;
   lanLink?.send({ action: 'SYNC_RESUME', payload: { points } });
 }
 
@@ -295,13 +305,66 @@ export function initRemoteSync(): void {
     }
   }
 
-  // Bring the direct link up immediately rather than waiting on the broker.
-  // Gating this behind the MQTT connect handler meant a slow or unreachable
-  // broker stopped the peer link from even being attempted — the exact
-  // situation where a local route matters most.
-  initLanLink();
+  // The broker exists to introduce two devices that cannot find each other.
+  // When the television is serving the remote itself they have already met, so
+  // neither the broker nor the WebRTC handshake is started at all: no traffic
+  // leaves the house, and pairing keeps working with the internet down.
+  void initLanDirect().then(direct => {
+    if (direct) return;
 
-  connectMqtt();
+    // Bring the peer link up immediately rather than waiting on the broker.
+    // Gating this behind the MQTT connect handler meant a slow or unreachable
+    // broker stopped the peer link from even being attempted — the exact
+    // situation where a local route matters most.
+    initLanLink();
+    connectMqtt();
+  });
+}
+
+/**
+ * Sets up the direct television-served remote, on whichever side we are.
+ *
+ * On the television this opens a port and starts serving the remote UI; on a
+ * phone that fetched the page from a television it starts long-polling it. In
+ * both cases the broker becomes a fallback that a normal living-room pairing
+ * never touches.
+ */
+async function initLanDirect(): Promise<boolean> {
+  const secret = getOrGeneratePairingSecret();
+
+  if (!state.isRemoteClient) {
+    const url = startTvLanServer(secret, cmd => {
+      // A command can only arrive once a phone has presented the pairing
+      // secret, so the first one is the moment the pairing actually completed.
+      updateLanBadge('connected', 'served from this TV');
+      handleIncomingRemoteCommand(cmd);
+    });
+    if (!url) return false;
+    // Seed the topics so a remote that connects later has something to render
+    // immediately rather than waiting for the next state change.
+    broadcastTVState();
+    broadcastTVCatalog();
+    return true;
+  }
+
+  if (!(await isServedByTv())) return false;
+
+  startRemoteLanClient(secret, (topic, payload) => {
+    if (topic === 'state') updateRemoteStateView(payload);
+    else if (topic === 'catalog') handleIncomingCatalogSync(payload);
+    else if (topic === 'resume') seriesContext.importResume(payload?.points || []);
+  });
+
+  updateLanBadge('connected', 'direct to TV');
+  const statEl = document.getElementById('remote-conn-status');
+  if (statEl) statEl.textContent = 'Connected to Quant TV';
+  const statDot = document.getElementById('remote-status-dot');
+  if (statDot) {
+    statDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse';
+  }
+  sendRemoteCmd('REMOTE_JOINED', { agent: navigator.userAgent });
+  sendRemoteCmd('REQUEST_SYNC');
+  return true;
 }
 
 export function sendRemoteCmd(action: string, payload: Record<string, any> = {}): void {
@@ -312,6 +375,15 @@ export function sendRemoteCmd(action: string, payload: Record<string, any> = {})
   }
   const msgId = `${action}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const cmd = { msgId, action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
+
+  // Straight to the television when it served this page: one LAN round trip,
+  // no broker, no peer handshake to have failed. Fire-and-forget because the
+  // remote's feedback is the state update that follows, not the POST's status.
+  if (isLanDirectActive()) {
+    void sendLanCommand(cmd);
+    if (broadcastChan) broadcastChan.postMessage(cmd);
+    return;
+  }
 
   // Direct LAN first — a keypress lands in single-digit milliseconds. send()
   // only reports true once the DataChannel is genuinely open, so falling back to
@@ -358,7 +430,11 @@ export function broadcastTVState(): void {
     favorites: state.favorites
   };
 
-  const sentDirect = lanLink?.send({ action: 'SYNC_STATE', payload: tvState }) ?? false;
+  // Served straight off this television, so the real URLs are safe to include:
+  // they never leave the local network.
+  const servedLocally = publishTvLanTopic('state', tvState);
+
+  const sentDirect = (lanLink?.send({ action: 'SYNC_STATE', payload: tvState }) ?? false) || servedLocally;
 
   if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_STATE', payload: tvState });
   if (!sentDirect && mqttClient && mqttClient.connected) {
@@ -395,7 +471,9 @@ export function broadcastTVCatalog(): void {
   // message. The MQTT path below can only carry a few hundred rows before the
   // broker's rate limits start dropping chunks, which is why the remote used to
   // show a truncated list; that path is now the fallback, not the default.
-  if (lanLink?.send({ action: 'SYNC_CATALOG', payload: { ...catalogData, favorites: state.favorites } })) {
+  const fullCatalog = { ...catalogData, favorites: state.favorites };
+  if (publishTvLanTopic('catalog', fullCatalog)) return;
+  if (lanLink?.send({ action: 'SYNC_CATALOG', payload: fullCatalog })) {
     return;
   }
 
@@ -914,6 +992,20 @@ export function setRemoteCategory(cat: string): void {
 }
 
 export function getPublicRemoteUrl(): string {
+  const secretForLink = getOrGeneratePairingSecret();
+
+  // When this television is serving the remote itself, the QR code should point
+  // at it and nowhere else: the phone then loads the UI over the LAN and talks
+  // straight back, so pairing works with the house offline and nothing —
+  // neither the catalogue nor the provider credentials — passes through a
+  // public host or broker.
+  const lanUrl = getTvLanServerUrl();
+  if (lanUrl) {
+    return `${lanUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}&k=${encodeURIComponent(
+      secretForLink
+    )}`;
+  }
+
   let baseUrl = window.location.origin;
   const isLocal =
     !baseUrl ||
@@ -931,8 +1023,9 @@ export function getPublicRemoteUrl(): string {
   // photograph the TV screen is already in the room; anyone merely watching the
   // public broker is not, and without this parameter their signalling is
   // rejected.
-  const secret = getOrGeneratePairingSecret();
-  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}&k=${encodeURIComponent(secret)}`;
+  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}&k=${encodeURIComponent(
+    secretForLink
+  )}`;
 }
 
 export function openRemotePairingModal(): void {

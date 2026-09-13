@@ -1,5 +1,6 @@
 package com.quantum.iptv;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.PictureInPictureParams;
 import android.content.Context;
@@ -29,6 +30,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -41,6 +43,51 @@ public class MainActivity extends BridgeActivity {
     private OkHttpClient httpClient;
     private long lastBackPressTime = 0;
     private Toast exitToast;
+    private QuantumLanRemoteServer lanRemoteServer;
+
+    /**
+     * Brings up the on-device remote server and hands commands it receives to
+     * the web layer, which already knows how to act on them.
+     */
+    private String startLanRemoteServer(String pairingSecret) {
+        if (lanRemoteServer == null) {
+            lanRemoteServer = new QuantumLanRemoteServer(this, json -> runOnUiThread(() -> {
+                WebView webView = this.getBridge().getWebView();
+                if (webView == null) return;
+                // Passed as a JSON string literal rather than spliced in raw: the
+                // body arrives from the network, and pasting it into a script
+                // would make any phone on the Wi-Fi able to run code in the app.
+                webView.evaluateJavascript(
+                    "window.onLanRemoteCommand && window.onLanRemoteCommand(" + jsonStringLiteral(json) + ");", null);
+            }));
+        }
+        return lanRemoteServer.start(pairingSecret);
+    }
+
+    /** Quotes arbitrary text as a JavaScript string literal. */
+    private static String jsonStringLiteral(String raw) {
+        StringBuilder sb = new StringBuilder(raw.length() + 16);
+        sb.append('"');
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    // Escape controls, and the line separators that are legal in
+                    // JSON but terminate a JavaScript string literal.
+                    if (c < 0x20 || c == 0x2028 || c == 0x2029) {
+                        sb.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.append('"').toString();
+    }
 
     public class AndroidTvNativeBridge {
         @JavascriptInterface
@@ -150,6 +197,48 @@ public class MainActivity extends BridgeActivity {
             return true;
         }
 
+        /**
+         * Starts serving the Quant Remote off this television.
+         *
+         * @return the base URL a phone should open, or "" when no LAN address or
+         *         port was available -- the web layer then falls back to the
+         *         broker-relayed remote.
+         */
+        @JavascriptInterface
+        public String startLanRemoteServer(String pairingSecret) {
+            String url = MainActivity.this.startLanRemoteServer(pairingSecret);
+            return url == null ? "" : url;
+        }
+
+        @JavascriptInterface
+        public void stopLanRemoteServer() {
+            if (lanRemoteServer != null) lanRemoteServer.stop();
+        }
+
+        /** Makes the latest value of a topic available to polling remotes. */
+        @JavascriptInterface
+        public void publishLanTopic(String topic, String json) {
+            if (lanRemoteServer != null) lanRemoteServer.publish(topic, json);
+        }
+
+        @JavascriptInterface
+        public boolean isLanRemoteServerRunning() {
+            return lanRemoteServer != null && lanRemoteServer.isRunning();
+        }
+
+        /**
+         * Re-derives the URL rather than echoing the one start() returned: a
+         * television that changes network keeps the same open port but answers
+         * on a different address, and a QR code showing the old one scans fine
+         * and then times out.
+         */
+        @JavascriptInterface
+        public String getLanRemoteServerUrl() {
+            if (lanRemoteServer == null || !lanRemoteServer.isRunning()) return "";
+            String url = lanRemoteServer.currentUrl();
+            return url == null ? "" : url;
+        }
+
         @JavascriptInterface
         public void toggleMute() {
             runOnUiThread(() -> {
@@ -257,6 +346,17 @@ public class MainActivity extends BridgeActivity {
             this.getBridge().setWebViewClient(tvClient);
             webView.setWebViewClient(tvClient);
         }
+    }
+
+    @Override
+    public void onDestroy() {
+        // The socket outlives the activity otherwise, and the next launch finds
+        // its port taken and quietly serves the remote one port over.
+        if (lanRemoteServer != null) {
+            lanRemoteServer.stop();
+            lanRemoteServer = null;
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -428,6 +528,13 @@ public class MainActivity extends BridgeActivity {
         return super.dispatchKeyEvent(event);
     }
 
+    /**
+     * Back is handled entirely here: the web layer gets first refusal (to close
+     * a modal or leave fullscreen), and only a second press within 2.5s exits.
+     * Delegating to super would finish the activity on the first press, which is
+     * the behaviour this override exists to replace.
+     */
+    @SuppressLint("MissingSuperCall")
     @Override
     public void onBackPressed() {
         WebView webView = this.getBridge().getWebView();
