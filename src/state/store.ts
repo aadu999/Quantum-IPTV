@@ -269,8 +269,49 @@ export function getOrGenerateRoomId(): string {
   }
   let stored = localStorage.getItem('quantum_iptv_room');
   if (!stored) {
-    stored = 'ROOM-' + Math.floor(1000 + Math.random() * 9000);
+    stored = 'ROOM-' + randomRoomToken(18);
     localStorage.setItem('quantum_iptv_room', stored);
+  }
+  // Existing four-digit rooms are upgraded in place. The room name is the only
+  // thing separating one household's topic from another on a shared public
+  // broker, and 9,000 possibilities can be enumerated in seconds.
+  if (/^ROOM-\d{4}$/.test(stored)) {
+    stored = 'ROOM-' + randomRoomToken(18);
+    localStorage.setItem('quantum_iptv_room', stored);
+  }
+  return stored;
+}
+
+/** Crypto-strength room token, falling back to Math.random only if unavailable. */
+function randomRoomToken(length: number): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  try {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
+  } catch {
+    let out = '';
+    for (let i = 0; i < length; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    return out;
+  }
+}
+
+/**
+ * Shared secret proving a peer actually scanned this TV's pairing code.
+ *
+ * The room id travels through the public broker, so possession of it proves
+ * nothing. The secret is carried only in the QR/pairing URL fragment, which
+ * never leaves the device that scanned it.
+ */
+export function getOrGeneratePairingSecret(): string {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('k');
+  if (fromUrl) return fromUrl;
+
+  let stored = localStorage.getItem('quantum_iptv_pair_key');
+  if (!stored) {
+    stored = randomRoomToken(24);
+    localStorage.setItem('quantum_iptv_pair_key', stored);
   }
   return stored;
 }

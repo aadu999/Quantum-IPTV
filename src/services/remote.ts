@@ -1,5 +1,5 @@
 import { Channel } from '../types';
-import { state, FALLBACK_LOGO } from '../state/store';
+import { state, FALLBACK_LOGO, getOrGeneratePairingSecret } from '../state/store';
 import { QuantumSessionStore } from '../state/session';
 import { parseXtreamInput, getXtreamCredentials, xtreamConnector } from './xtream';
 import { formatTimestamp } from '../ui/controls';
@@ -62,6 +62,8 @@ function updateLanBadge(status: LanLinkStatus, detail?: string): void {
 function initLanLink(): void {
   if (lanLink) return;
   lanLink = new QuantumLanLink(state.isRemoteClient ? 'remote' : 'tv', {
+    // Carried in the pairing URL the QR code encodes, never over the broker.
+    pairingSecret: getOrGeneratePairingSecret(),
     onMessage: data => {
       if (!data) return;
       if (data.action === 'SYNC_RESUME') {
@@ -118,6 +120,38 @@ export function syncResumePoints(): void {
   const points = seriesContext.exportResume();
   if (points.length === 0) return;
   lanLink?.send({ action: 'SYNC_RESUME', payload: { points } });
+}
+
+
+/**
+ * Removes account credentials from a stream URL.
+ *
+ * Xtream embeds them in the path (/live/<user>/<pass>/<id>.ts) and some
+ * providers repeat them as query parameters, so both forms have to go before
+ * anything is handed to the shared broker.
+ */
+function redactUrlForRelay(url?: string): string {
+  if (!url) return '';
+  return url
+    .replace(/\/(series|movie|live)\/([^/]+)\/([^/]+)\//i, '/$1/***/***/')
+    .replace(/([?&](?:username|user|password|pass|token|mac)=)[^&#]*/gi, '$1***');
+}
+
+/**
+ * Strips provider credentials from anything bound for the shared MQTT broker.
+ *
+ * The broker is public and the room topic is guessable, so every field that can
+ * carry an account's username and password has to be scrubbed -- not just the
+ * session blob. The stream URLs in the state payload and in each catalogue chunk
+ * carry exactly the same credentials in their path, and were being published
+ * verbatim.
+ *
+ * The remote does not need them: it tunes by channel id, which the TV resolves
+ * against its own catalogue. Real URLs still travel over the encrypted peer
+ * link, so nothing is lost when the devices are directly connected.
+ */
+function redactCatalogItemForRelay<T extends { url?: string }>(item: T): T {
+  return { ...item, url: redactUrlForRelay(item.url) };
 }
 
 /**
@@ -328,7 +362,10 @@ export function broadcastTVState(): void {
 
   if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_STATE', payload: tvState });
   if (!sentDirect && mqttClient && mqttClient.connected) {
-    mqttClient.publish(`quantum_tv/${state.roomId}/state`, JSON.stringify(tvState));
+    // channelUrl carries the account credentials in its path; the broker copy
+    // must not.
+    const relayState = { ...tvState, channelUrl: redactUrlForRelay(tvState.channelUrl) };
+    mqttClient.publish(`quantum_tv/${state.roomId}/state`, JSON.stringify(relayState));
   }
 }
 
@@ -393,9 +430,11 @@ export function broadcastTVCatalog(): void {
         }));
         const chunkPayload = {
           type: 'series',
+          // Published over the public broker, so item URLs are scrubbed of the
+          // account credentials Xtream embeds in their path.
+          items: chunkItems.map(redactCatalogItemForRelay),
           chunkIndex: i,
           totalChunks: totalSeriesChunks,
-          items: chunkItems
         };
         setTimeout(() => {
           if (mqttClient && mqttClient.connected) {
@@ -425,9 +464,11 @@ export function broadcastTVCatalog(): void {
         }));
         const chunkPayload = {
           type: 'vod',
+          // Published over the public broker, so item URLs are scrubbed of the
+          // account credentials Xtream embeds in their path.
+          items: chunkItems.map(redactCatalogItemForRelay),
           chunkIndex: i,
           totalChunks: totalMovieChunks,
-          items: chunkItems
         };
         setTimeout(() => {
           if (mqttClient && mqttClient.connected) {
@@ -455,9 +496,11 @@ export function broadcastTVCatalog(): void {
         }));
         const chunkPayload = {
           type: 'live',
+          // Published over the public broker, so item URLs are scrubbed of the
+          // account credentials Xtream embeds in their path.
+          items: chunkItems.map(redactCatalogItemForRelay),
           chunkIndex: i,
           totalChunks: totalLiveChunks,
-          items: chunkItems
         };
         setTimeout(() => {
           if (mqttClient && mqttClient.connected) {
@@ -884,7 +927,12 @@ export function getPublicRemoteUrl(): string {
   if (isLocal) {
     baseUrl = 'https://quantum-iptv.vercel.app';
   }
-  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}`;
+  // The pairing secret rides in the URL the QR code encodes. Anyone who can
+  // photograph the TV screen is already in the room; anyone merely watching the
+  // public broker is not, and without this parameter their signalling is
+  // rejected.
+  const secret = getOrGeneratePairingSecret();
+  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}&k=${encodeURIComponent(secret)}`;
 }
 
 export function openRemotePairingModal(): void {
