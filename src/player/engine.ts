@@ -49,6 +49,12 @@ const MAX_MEDIA_ERROR_RECOVERIES = 3;
 /** Absolute cap on in-place network retries before moving down the ladder. */
 const MAX_NETWORK_RETRIES = 2;
 
+/**
+ * Diagnostic probes allowed per playback attempt. Enough to characterise the
+ * failure without spending a connection-limited account's whole budget.
+ */
+const MAX_PROBES_PER_ATTEMPT = 4;
+
 
 /**
  * Ladder for a single on-demand asset (a series episode or a movie).
@@ -116,6 +122,14 @@ export class QuantumStreamEngine {
   private ladderIndex = -1;
   /** Guards against two handlers advancing the ladder for the same attempt. */
   private lastAdvancedGeneration = -1;
+  /** Bounds diagnostic probes so a connection-limited account is not exhausted. */
+  private probesThisAttempt = 0;
+  /**
+   * True while an episode or movie is loaded. currentChannelIndex still points
+   * at the channel list during on-demand playback, so nothing downstream may
+   * treat the selected channel as "what is playing".
+   */
+  private currentIsOnDemand = false;
   private startupTimer: any = null;
   private hasRenderedFrame = false;
   private mediaListenerCleanups: Array<() => void> = [];
@@ -320,6 +334,7 @@ export class QuantumStreamEngine {
     // an unrelated live stream, so the viewer ended up watching something they
     // never asked for instead of seeing the episode fail.
     const isOnDemand = /\/(series|movie)\//i.test(url);
+    this.currentIsOnDemand = isOnDemand;
 
     if (isOnDemand) {
       this.ladder = buildOnDemandLadder(url);
@@ -340,6 +355,7 @@ export class QuantumStreamEngine {
 
     // Otherwise start at the healthiest rung rather than whatever order the
     // playlist happened to list the sources in.
+    this.probesThisAttempt = 0;
     this.ladderIndex = 0;
     this.playCandidate(this.ladder[0]);
   }
@@ -353,9 +369,18 @@ export class QuantumStreamEngine {
    * on-demand content that meant an episode never got its proxied or
    * alternate-container retry, and simply refused to play.
    */
-  handleVideoElementError(): void {
+  handleVideoElementError(generation?: number): void {
     if (!this.currentSourceUrl) return;
+    // Every other error path is generation-guarded; without the same check a
+    // late error from a source the viewer already left burns a rung of the
+    // attempt that replaced it.
+    if (typeof generation === 'number' && generation !== this.loadGeneration) return;
     this.advanceLadder('video_element_error');
+  }
+
+  /** Current load token, so external listeners can guard their callbacks. */
+  get currentLoadGeneration(): number {
+    return this.loadGeneration;
   }
 
   /** Moves to the next untried rung, or declares the channel offline. */
@@ -378,7 +403,7 @@ export class QuantumStreamEngine {
 
     const abandoned = this.ladder[this.ladderIndex];
     if (abandoned) {
-      playbackDiagnostics.recordRung({
+      const rungId = playbackDiagnostics.recordRung({
         sourceName: abandoned.sourceName,
         url: abandoned.url,
         proxied: abandoned.proxied,
@@ -387,7 +412,7 @@ export class QuantumStreamEngine {
       });
       // The element reports only a generic code; the panel's actual status is
       // what distinguishes bad credentials from a missing file, so fetch it.
-      this.probeStatus(abandoned.targetUrl);
+      this.probeStatus(abandoned.targetUrl, rungId);
     }
 
     const next = this.ladderIndex + 1;
@@ -395,20 +420,24 @@ export class QuantumStreamEngine {
       this.onStreamFailed(reason);
       return;
     }
-    if (!channel && !this.ladder[next]) {
+    this.ladderIndex = next;
+    const candidate = this.ladder[next];
+    if (!candidate) {
       this.onStreamFailed(reason);
       return;
     }
-
-    this.ladderIndex = next;
-    const candidate = this.ladder[next];
 
     if (candidate.sourceIndex >= 0 && channel) {
       channel.activeSourceIndex = candidate.sourceIndex;
     }
 
+    // channel is absent for on-demand playback and whenever the list is empty,
+    // so it can never be dereferenced here.
+    const label = this.currentIsOnDemand
+      ? seriesContext.currentEpisode?.title || 'requested stream'
+      : channel?.name || 'current stream';
     console.log(
-      `[QuantumStreamEngine] Failing over to ${candidate.sourceName} (rung ${next + 1}/${this.ladder.length}) for ${channel.name}`
+      `[QuantumStreamEngine] Failing over to ${candidate.sourceName} (rung ${next + 1}/${this.ladder.length}) for ${label}`
     );
     eventBus.emit('SOURCE_SWITCHED', {
       fromUrl: this.currentSourceUrl,
@@ -429,19 +458,42 @@ export class QuantumStreamEngine {
    * never delay the next rung. Range-limited so it costs a few bytes rather than
    * pulling the asset.
    */
-  private probeStatus(targetUrl: string): void {
-    try {
+  /**
+   * Asks the origin what it actually returns for a URL that just failed to play.
+   *
+   * HEAD first: many IPTV accounts allow only one or two concurrent connections,
+   * and a ranged GET against every rung of an eight-step ladder can exhaust that
+   * budget and manufacture the very 403 the probe is trying to diagnose. HEAD
+   * costs no body and releases immediately; a ranged GET is the fallback for
+   * panels that reject it.
+   *
+   * Fire-and-forget: the result only annotates a diagnostic record, so it must
+   * never delay the next rung.
+   */
+  private probeStatus(targetUrl: string, rungId: number): void {
+    if (this.probesThisAttempt >= MAX_PROBES_PER_ATTEMPT) return;
+    this.probesThisAttempt++;
+
+    const annotate = (patch: { httpStatus?: number; httpNote?: string }) =>
+      playbackDiagnostics.annotateRung(rungId, patch);
+
+    const rangedGet = () =>
       fetch(targetUrl, { method: 'GET', headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(6000) })
+        .then(resp => annotate({ httpStatus: resp.status, httpNote: resp.headers.get('content-type') || undefined }))
+        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed' }));
+
+    try {
+      fetch(targetUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
         .then(resp => {
-          playbackDiagnostics.annotateLastRung({
-            httpStatus: resp.status,
-            httpNote: resp.headers.get('content-type') || undefined
-          });
+          // 405/501 mean the panel refuses HEAD, not that the asset is missing.
+          if (resp.status === 405 || resp.status === 501) return rangedGet();
+          annotate({ httpStatus: resp.status, httpNote: resp.headers.get('content-type') || undefined });
         })
-        .catch((err: any) => {
-          // Status 0 stands for "never got an answer": blocked, refused, CORS.
-          playbackDiagnostics.annotateLastRung({ httpStatus: 0, httpNote: err?.name || 'fetch failed' });
-        });
+        // A network-level rejection is not evidence that HEAD is unsupported,
+        // and retrying with a GET would spend another connection on an account
+        // that may only allow one -- manufacturing the very 403 that explain()
+        // would then report as bad credentials.
+        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed' }));
     } catch {
       /* fetch unavailable */
     }
@@ -634,14 +686,19 @@ export class QuantumStreamEngine {
     const curCh = state.filteredChannels[state.currentChannelIndex];
     playbackDiagnostics.end('FAILED');
     sessionManager.endSession('FAILED');
-    if (curCh) {
-      playbackMachine.endAttempt('FAILED', reason);
+    playbackMachine.endAttempt('FAILED', reason);
+
+    // Only a live channel's failure reflects on that channel. An episode that
+    // will not play says nothing about whichever channel happens to be selected
+    // in the list, and marking it offline would hide and demote a healthy one.
+    if (curCh && !this.currentIsOnDemand) {
       state.offlineChannels.add(curCh.id);
-      // Every rung of the failover ladder is spent, so this is a real failure
-      // of the channel rather than of one source.
       channelReliability.recordFailed(curCh.id);
-      this.showOfflineOverlay(curCh);
     }
+
+    // Shown regardless: an on-demand failure with no valid selected channel
+    // previously produced no overlay at all.
+    this.showOfflineOverlay(curCh || null);
     try {
       (window as any).showEngineHud?.(true, 0);
     } catch (e) {}
@@ -760,7 +817,7 @@ export class QuantumStreamEngine {
     }
   }
 
-  showOfflineOverlay(channel: Channel): void {
+  showOfflineOverlay(channel: Channel | null): void {
     if (state.isRemoteClient) return;
     const overlay = document.getElementById('offline-overlay');
     const nameEl = document.getElementById('offline-channel-name');
@@ -803,8 +860,12 @@ export class QuantumStreamEngine {
       retryBtn.dataset.bound = 'true';
       retryBtn.addEventListener('click', () => {
         this.hideOfflineOverlay();
+        // Retry the asset that failed. Falling back to the selected channel's
+        // URL restarted an unrelated live stream instead of the episode.
+        const failed = this.currentSourceUrl;
         const cur = state.filteredChannels[state.currentChannelIndex];
-        if (cur) this.load(cur.url);
+        const target = failed || cur?.url;
+        if (target) this.load(target);
       });
     }
 
@@ -818,6 +879,16 @@ export class QuantumStreamEngine {
     }
 
     if (this.offlineCountdownTimer) clearInterval(this.offlineCountdownTimer);
+
+    // Auto-advancing away from an episode would drop the viewer out of the
+    // series they chose, so on-demand failures wait for a decision. The
+    // countdown is hidden in that case rather than counting to zero and doing
+    // nothing, which read as the app having hung.
+    const willAutoAdvance = !this.currentIsOnDemand && !!channel;
+    const countdownWrap = countdownEl?.parentElement;
+    if (countdownWrap) countdownWrap.classList.toggle('hidden', !willAutoAdvance);
+    if (!willAutoAdvance) return;
+
     let secondsLeft = 6;
     if (countdownEl) countdownEl.textContent = `${secondsLeft}s`;
 
@@ -827,13 +898,7 @@ export class QuantumStreamEngine {
       if (secondsLeft <= 0) {
         clearInterval(this.offlineCountdownTimer);
         this.offlineCountdownTimer = null;
-        // Auto-advancing away from an episode would drop the viewer out of the
-        // series they chose; only live channels roll on.
-        const cur = state.filteredChannels[state.currentChannelIndex];
-        const isOnDemand = /\/(series|movie)\//i.test(this.currentSourceUrl || '');
-        if (!isOnDemand && cur) {
-          (window as any).playNextWorkingChannel?.();
-        }
+        (window as any).playNextWorkingChannel?.();
       }
     }, 1000);
   }
