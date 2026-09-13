@@ -84,6 +84,19 @@ export function canHandOffToExternalPlayer(): boolean {
 }
 
 /**
+ * True when the Android app can play this stream itself, via ExoPlayer's native
+ * Matroska demuxer, instead of handing off to another app entirely.
+ *
+ * Checked ahead of canHandOffToExternalPlayer(): a title that used to require
+ * VLC/MX Player (or fail outright when neither was installed) now just plays,
+ * on any APK build new enough to expose this bridge method.
+ */
+export function canHandOffToNativePlayer(): boolean {
+  const native = (typeof window !== 'undefined' && (window as any).AndroidTvNative) || null;
+  return !!native && typeof native.playInNativePlayer === 'function';
+}
+
+/**
  * A short label for an episode card, or '' when the title should play normally.
  */
 export function unplayableBadge(url: string): string {

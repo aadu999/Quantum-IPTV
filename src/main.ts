@@ -77,6 +77,7 @@ import {
 } from './ui/modals';
 import { showAppAlert, showAppConfirm, closeAppDialog } from './ui/dialog';
 import { initTvNavigation } from './ui/tv-navigation';
+import { registerNativePlayerCallbacks } from './services/native-player';
 
 // Instantiate Core Stream Engine
 const videoElement = document.getElementById('video-player') as HTMLVideoElement;
@@ -86,6 +87,7 @@ export const engine = new QuantumStreamEngine(videoElement);
 setEngineInstance(engine);
 setChannelEngineInstance(engine);
 setModalEngineInstance(engine);
+registerNativePlayerCallbacks();
 
 // Window Attachments for Global HTML Handlers
 (window as any).engine = engine;

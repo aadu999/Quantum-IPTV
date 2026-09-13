@@ -358,7 +358,7 @@ let resumeAppliedForGeneration = -1;
  * fires several times a second, and the resume map is persisted to
  * localStorage.
  */
-function recordResumeProgress(positionSec: number, durationSec: number): void {
+export function recordResumeProgress(positionSec: number, durationSec: number): void {
   if (!durationSec || !isFinite(durationSec) || durationSec <= 0) return;
 
   const now = Date.now();

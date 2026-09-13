@@ -3,8 +3,10 @@ package com.quantum.iptv;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.PictureInPictureParams;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.media.AudioManager;
@@ -20,6 +22,10 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
@@ -58,6 +64,35 @@ public class MainActivity extends BridgeActivity {
      * newKeySet() is API 24 anyway, above this app's minimum of 23).
      */
     private volatile Set<Integer> claimedKeyCodes = Collections.emptySet();
+
+    private BroadcastReceiver nativePlayerProgressReceiver;
+
+    /**
+     * Must be registered before onStart() -- doing it as a field initializer
+     * runs it during construction, which is always early enough.
+     */
+    private final ActivityResultLauncher<Intent> nativePlayerLauncher = registerForActivityResult(
+        new ActivityResultContracts.StartActivityForResult(),
+        result -> {
+            Intent data = result.getData();
+            WebView webView = this.getBridge().getWebView();
+            if (webView == null || data == null) return;
+            String episodeId = data.getStringExtra(NativePlayerActivity.RESULT_EXTRA_EPISODE_ID);
+            double positionSec = data.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_POSITION_SEC, 0);
+            double durationSec = data.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_DURATION_SEC, 0);
+            boolean completed = data.getBooleanExtra(NativePlayerActivity.RESULT_EXTRA_COMPLETED, false);
+            String error = data.getStringExtra(NativePlayerActivity.RESULT_EXTRA_ERROR);
+            webView.evaluateJavascript(
+                "window.onNativePlayerEnded && window.onNativePlayerEnded("
+                    + jsonStringLiteral(episodeId == null ? "" : episodeId) + ", "
+                    + positionSec + ", "
+                    + durationSec + ", "
+                    + completed + ", "
+                    + (error == null ? "null" : jsonStringLiteral(error))
+                    + ");",
+                null);
+        }
+    );
 
     /**
      * Brings up the on-device remote server and hands commands it receives to
@@ -292,6 +327,33 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
+        /**
+         * Plays a stream ExoPlayer can decode natively that this WebView's
+         * &lt;video&gt; element cannot -- chiefly Matroska. Preferred over
+         * openInExternalPlayer when available: the title plays inside the app
+         * instead of handing off to VLC/MX Player, or failing outright when
+         * neither is installed.
+         *
+         * @return false only when the URL is empty; launching the activity
+         *         cannot fail synchronously the way resolveActivity() can for
+         *         an external app, so there is nothing else to check here.
+         */
+        @JavascriptInterface
+        public boolean playInNativePlayer(String url, String title, double startPositionSec, String episodeId, String thumbUrl) {
+            if (url == null || url.isEmpty()) return false;
+            runOnUiThread(() -> {
+                Intent intent = new Intent(MainActivity.this, NativePlayerActivity.class);
+                intent.putExtra(NativePlayerActivity.EXTRA_URL, url);
+                intent.putExtra(NativePlayerActivity.EXTRA_TITLE, title == null ? "" : title);
+                intent.putExtra(NativePlayerActivity.EXTRA_START_POSITION_SEC, startPositionSec);
+                intent.putExtra(NativePlayerActivity.EXTRA_EPISODE_ID, episodeId == null ? "" : episodeId);
+                intent.putExtra(NativePlayerActivity.EXTRA_THUMB_URL, thumbUrl == null ? "" : thumbUrl);
+                nativePlayerLauncher.launch(intent);
+                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+            });
+            return true;
+        }
+
         @JavascriptInterface
         public void setClaimedTvKeyCodes(String csv) {
             Set<Integer> next = new HashSet<>();
@@ -434,6 +496,29 @@ public class MainActivity extends BridgeActivity {
             this.getBridge().setWebViewClient(tvClient);
             webView.setWebViewClient(tvClient);
         }
+
+        nativePlayerProgressReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                WebView bridgeWebView = MainActivity.this.getBridge().getWebView();
+                if (bridgeWebView == null) return;
+                String episodeId = intent.getStringExtra(NativePlayerActivity.RESULT_EXTRA_EPISODE_ID);
+                double positionSec = intent.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_POSITION_SEC, 0);
+                double durationSec = intent.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_DURATION_SEC, 0);
+                bridgeWebView.evaluateJavascript(
+                    "window.onNativePlayerProgress && window.onNativePlayerProgress("
+                        + jsonStringLiteral(episodeId == null ? "" : episodeId) + ", "
+                        + positionSec + ", "
+                        + durationSec + ");",
+                    null);
+            }
+        };
+        ContextCompat.registerReceiver(
+            this,
+            nativePlayerProgressReceiver,
+            new IntentFilter(NativePlayerActivity.ACTION_PROGRESS),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        );
     }
 
     @Override
@@ -443,6 +528,10 @@ public class MainActivity extends BridgeActivity {
         if (lanRemoteServer != null) {
             lanRemoteServer.stop();
             lanRemoteServer = null;
+        }
+        if (nativePlayerProgressReceiver != null) {
+            unregisterReceiver(nativePlayerProgressReceiver);
+            nativePlayerProgressReceiver = null;
         }
         super.onDestroy();
     }

@@ -48,6 +48,16 @@ export class QuantumStreamWatchdog {
     this.intervalId = setInterval(() => this.tick(), TICK_INTERVAL_MS);
   }
 
+  /**
+   * Tells the classifier whether the current attempt is a live zap or an
+   * on-demand episode/movie, so it applies the right starvation tolerance.
+   * Call before start() for a new attempt; reset() intentionally leaves the
+   * mode alone since it is a property of the content, not of one tick cycle.
+   */
+  setContentMode(mode: 'live' | 'ondemand'): void {
+    this.classifier.setMode(mode);
+  }
+
   stop(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);

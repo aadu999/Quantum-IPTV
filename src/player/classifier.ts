@@ -62,6 +62,19 @@ export class StallClassifier {
   private starvationTicks = 0;
   private stallStartedAt = 0;
   private consecutiveStutterTicks = 0;
+  private mode: 'live' | 'ondemand' = 'live';
+
+  /**
+   * An episode or movie is a progressive download, not a live zap: producing
+   * a first frame can legitimately take much longer than any live source
+   * ever should, especially on a panel whose VOD library was not remuxed
+   * with the moov atom at the front of the file. Applying the live-zap
+   * starvation clock to that made a stream that was still buffering look
+   * indistinguishable from a dead one.
+   */
+  setMode(mode: 'live' | 'ondemand'): void {
+    this.mode = mode;
+  }
 
   classify(snapshot: TelemetrySnapshot): StallDiagnosis {
     // A tick with no elapsed wall time carries no information — the first
@@ -219,12 +232,19 @@ export class StallClassifier {
       this.starvationTicks++;
 
       // Escalation is driven by elapsed seconds rather than tick count so the
-      // thresholds mean the same thing regardless of timer jitter.
+      // thresholds mean the same thing regardless of timer jitter. On-demand
+      // content gets a much longer runway: a live source that is still silent
+      // after 6s is almost certainly dead, but an episode can legitimately
+      // still be pulling toward its moov atom at that point.
+      const criticalAt = this.mode === 'ondemand' ? 20 : 6;
+      const highAt = this.mode === 'ondemand' ? 10 : 3;
+      const reloadAt = this.mode === 'ondemand' ? 8 : 2.5;
+
       const severity =
-        stallDurationSec >= 6 ? 'CRITICAL' : stallDurationSec >= 3 ? 'HIGH' : 'LOW';
+        stallDurationSec >= criticalAt ? 'CRITICAL' : stallDurationSec >= highAt ? 'HIGH' : 'LOW';
 
       const recommendedAction: RecoveryActionType =
-        stallDurationSec >= 6 ? 'FAILOVER_SOURCE' : stallDurationSec >= 2.5 ? 'HLS_RELOAD' : 'NONE';
+        stallDurationSec >= criticalAt ? 'FAILOVER_SOURCE' : stallDurationSec >= reloadAt ? 'HLS_RELOAD' : 'NONE';
 
       eventBus.emit('STALL_CLASSIFIED', {
         type: 'NETWORK_STARVATION',
