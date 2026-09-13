@@ -1,7 +1,7 @@
 {
   "name": "quantum-stream-platform",
   "private": true,
-  "version": "2.1.0-beta",
+  "version": "2.2.0",
   "description": "Next-Gen Quantum IPTV & IoT Remote TV Player with Zero-FOUT offline styling, Malayalam presets, and Android TV spatial navigation.",
   "author": "Adarsh Raveendran <hello@adarsh.one> (https://github.com/aadu999)",
   "contributors": [

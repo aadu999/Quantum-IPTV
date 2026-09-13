@@ -1,5 +1,39 @@
 apply plugin: 'com.android.application'
 
+/**
+ * Release signing.
+ *
+ * Supply a keystore either through android/keystore.properties (git-ignored) or
+ * through the environment, which is what a CI runner should use:
+ *
+ *   QUANTUM_KEYSTORE_FILE, QUANTUM_KEYSTORE_PASSWORD,
+ *   QUANTUM_KEY_ALIAS, QUANTUM_KEY_PASSWORD
+ *
+ * Without one the release build falls back to the debug certificate and says so
+ * loudly. That fallback used to be silent and unconditional, which produced an
+ * "app-release.apk" carrying the "Android Debug" identity -- rejected by Play,
+ * and an identity anyone can reproduce, so any third party could build an APK
+ * the device would accept as an update.
+ */
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def ks = { String prop, String env ->
+    keystoreProps.getProperty(prop) ?: System.getenv(env)
+}
+
+def releaseStoreFile = ks('storeFile', 'QUANTUM_KEYSTORE_FILE')
+def releaseStorePassword = ks('storePassword', 'QUANTUM_KEYSTORE_PASSWORD')
+def releaseKeyAlias = ks('keyAlias', 'QUANTUM_KEY_ALIAS')
+def releaseKeyPassword = ks('keyPassword', 'QUANTUM_KEY_PASSWORD')
+
+def hasReleaseSigning = releaseStoreFile != null && !releaseStoreFile.isEmpty() &&
+        file(releaseStoreFile).exists() && releaseStorePassword != null &&
+        releaseKeyAlias != null && releaseKeyPassword != null
+
 android {
     namespace "com.quantum.iptv"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +41,8 @@ android {
         applicationId "com.quantum.iptv"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "2.1.0-beta"
+        versionCode 3
+        versionName "2.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,11 +50,28 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else {
+                // Still produces an installable APK for sideloading and testing,
+                // but it is not a distributable build and must not be presented
+                // as one.
+                signingConfig signingConfigs.debug
+            }
         }
     }
     lint {
@@ -30,6 +81,21 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+if (!hasReleaseSigning) {
+    gradle.taskGraph.whenReady { graph ->
+        if (graph.allTasks.any { it.name.toLowerCase().contains('release') }) {
+            logger.warn("")
+            logger.warn("*********************************************************************")
+            logger.warn("  No release keystore configured -- signing with the DEBUG key.")
+            logger.warn("  This APK cannot be published and must not be distributed.")
+            logger.warn("  Set QUANTUM_KEYSTORE_FILE / _PASSWORD / QUANTUM_KEY_ALIAS /")
+            logger.warn("  QUANTUM_KEY_PASSWORD, or create android/keystore.properties.")
+            logger.warn("*********************************************************************")
+            logger.warn("")
+        }
     }
 }
 
