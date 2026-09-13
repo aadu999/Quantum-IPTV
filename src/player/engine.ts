@@ -12,6 +12,8 @@ import { sourceHealthTracker } from './source-health';
 import { buildFailoverLadder, FailoverCandidate } from './failover-ladder';
 import { getProxiedUrl, shouldProxy } from '../services/proxy';
 import { channelReliability } from '../state/channel-health';
+import { playbackDiagnostics } from './diagnostics';
+import { seriesContext } from '../state/series-context';
 
 /**
  * How long a load may sit without producing a single rendered frame before it is
@@ -306,6 +308,11 @@ export class QuantumStreamEngine {
     }
 
     playbackMachine.startAttempt(channel, url);
+    // Name what the viewer actually chose. currentChannelIndex still points at
+    // whatever live channel was last tuned, so using it for an episode labelled
+    // the failure with an unrelated channel's name.
+    const episode = /\/(series|movie)\//i.test(url) ? seriesContext.currentEpisode : null;
+    playbackDiagnostics.begin(episode?.title || channel?.name || 'Requested stream', url);
 
     // An episode or movie stream is self-contained: it belongs to the title the
     // viewer picked, not to whatever channel happens to be selected in the list.
@@ -369,8 +376,26 @@ export class QuantumStreamEngine {
       circuitBreaker.recordFailure(this.currentSourceUrl, reason);
     }
 
+    const abandoned = this.ladder[this.ladderIndex];
+    if (abandoned) {
+      playbackDiagnostics.recordRung({
+        sourceName: abandoned.sourceName,
+        url: abandoned.url,
+        proxied: abandoned.proxied,
+        reason,
+        mediaErrorCode: this.video?.error?.code
+      });
+      // The element reports only a generic code; the panel's actual status is
+      // what distinguishes bad credentials from a missing file, so fetch it.
+      this.probeStatus(abandoned.targetUrl);
+    }
+
     const next = this.ladderIndex + 1;
-    if (!channel || next >= this.ladder.length) {
+    if (next >= this.ladder.length) {
+      this.onStreamFailed(reason);
+      return;
+    }
+    if (!channel && !this.ladder[next]) {
       this.onStreamFailed(reason);
       return;
     }
@@ -395,6 +420,31 @@ export class QuantumStreamEngine {
     this.showToast(`Switching to ${candidate.sourceName}...`, 'info');
     this.showSpinner(true, `Failing over to ${candidate.sourceName}...`);
     this.playCandidate(candidate);
+  }
+
+  /**
+   * Asks the origin what it actually returns for a URL that just failed to play.
+   *
+   * Fire-and-forget: the answer only annotates the diagnostic record, so it must
+   * never delay the next rung. Range-limited so it costs a few bytes rather than
+   * pulling the asset.
+   */
+  private probeStatus(targetUrl: string): void {
+    try {
+      fetch(targetUrl, { method: 'GET', headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(6000) })
+        .then(resp => {
+          playbackDiagnostics.annotateLastRung({
+            httpStatus: resp.status,
+            httpNote: resp.headers.get('content-type') || undefined
+          });
+        })
+        .catch((err: any) => {
+          // Status 0 stands for "never got an answer": blocked, refused, CORS.
+          playbackDiagnostics.annotateLastRung({ httpStatus: 0, httpNote: err?.name || 'fetch failed' });
+        });
+    } catch {
+      /* fetch unavailable */
+    }
   }
 
   private playCandidate(candidate: FailoverCandidate): void {
@@ -543,6 +593,7 @@ export class QuantumStreamEngine {
     this.hideOfflineOverlay();
     this.updateHudResolution();
 
+    playbackDiagnostics.end('PLAYING');
     const ztf = sessionManager.recordFirstFrame();
     if (ztf !== null) {
       const ztfEl = document.getElementById('hud-ztf');
@@ -581,6 +632,7 @@ export class QuantumStreamEngine {
     this.clearMediaListeners();
     this.showSpinner(false);
     const curCh = state.filteredChannels[state.currentChannelIndex];
+    playbackDiagnostics.end('FAILED');
     sessionManager.endSession('FAILED');
     if (curCh) {
       playbackMachine.endAttempt('FAILED', reason);
@@ -712,11 +764,58 @@ export class QuantumStreamEngine {
     if (state.isRemoteClient) return;
     const overlay = document.getElementById('offline-overlay');
     const nameEl = document.getElementById('offline-channel-name');
+    const reasonEl = document.getElementById('offline-reason');
+    const detailsEl = document.getElementById('offline-details');
     const countdownEl = document.getElementById('offline-countdown');
     if (!overlay) return;
 
-    if (nameEl && channel) nameEl.textContent = channel.name;
+    const onDemandTitle = /\/(series|movie)\//i.test(this.currentSourceUrl || '')
+      ? seriesContext.currentEpisode?.title
+      : null;
+    if (nameEl) nameEl.textContent = onDemandTitle || channel?.name || 'this stream';
+
+    // The probe that supplies the HTTP status resolves shortly after the last
+    // rung fails, so explain once now and refresh when it lands.
+    const renderDiagnosis = () => {
+      if (reasonEl) reasonEl.textContent = playbackDiagnostics.explain();
+      if (detailsEl && !detailsEl.classList.contains('hidden')) {
+        detailsEl.textContent = playbackDiagnostics.report();
+      }
+    };
+    renderDiagnosis();
+    setTimeout(renderDiagnosis, 1500);
+
     overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+
+    const detailsBtn = document.getElementById('offline-details-btn');
+    if (detailsBtn && !detailsBtn.dataset.bound) {
+      detailsBtn.dataset.bound = 'true';
+      detailsBtn.addEventListener('click', () => {
+        if (!detailsEl) return;
+        detailsEl.classList.toggle('hidden');
+        detailsEl.textContent = playbackDiagnostics.report();
+      });
+    }
+
+    const retryBtn = document.getElementById('offline-retry-btn');
+    if (retryBtn && !retryBtn.dataset.bound) {
+      retryBtn.dataset.bound = 'true';
+      retryBtn.addEventListener('click', () => {
+        this.hideOfflineOverlay();
+        const cur = state.filteredChannels[state.currentChannelIndex];
+        if (cur) this.load(cur.url);
+      });
+    }
+
+    const nextBtn = document.getElementById('offline-next-btn');
+    if (nextBtn && !nextBtn.dataset.bound) {
+      nextBtn.dataset.bound = 'true';
+      nextBtn.addEventListener('click', () => {
+        this.hideOfflineOverlay();
+        (window as any).playNextWorkingChannel?.();
+      });
+    }
 
     if (this.offlineCountdownTimer) clearInterval(this.offlineCountdownTimer);
     let secondsLeft = 6;
@@ -727,7 +826,14 @@ export class QuantumStreamEngine {
       if (countdownEl) countdownEl.textContent = `${secondsLeft}s`;
       if (secondsLeft <= 0) {
         clearInterval(this.offlineCountdownTimer);
-        (window as any).playNextWorkingChannel?.();
+        this.offlineCountdownTimer = null;
+        // Auto-advancing away from an episode would drop the viewer out of the
+        // series they chose; only live channels roll on.
+        const cur = state.filteredChannels[state.currentChannelIndex];
+        const isOnDemand = /\/(series|movie)\//i.test(this.currentSourceUrl || '');
+        if (!isOnDemand && cur) {
+          (window as any).playNextWorkingChannel?.();
+        }
       }
     }, 1000);
   }
@@ -738,7 +844,10 @@ export class QuantumStreamEngine {
       this.offlineCountdownTimer = null;
     }
     const overlay = document.getElementById('offline-overlay');
-    if (overlay) overlay.classList.add('hidden');
+    if (overlay) {
+      overlay.classList.add('hidden');
+      overlay.classList.remove('flex');
+    }
   }
 
   updateSubtitlesAndAudioTracks(): void {
