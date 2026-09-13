@@ -62,6 +62,19 @@ export class StallClassifier {
   private starvationTicks = 0;
   private stallStartedAt = 0;
   private consecutiveStutterTicks = 0;
+  private mode: 'live' | 'ondemand' = 'live';
+
+  /**
+   * An episode or movie is a progressive download, not a live zap: producing
+   * a first frame can legitimately take much longer than any live source
+   * ever should, especially on a panel whose VOD library was not remuxed
+   * with the moov atom at the front of the file. Applying the live-zap
+   * starvation clock to that made a stream that was still buffering look
+   * indistinguishable from a dead one.
+   */
+  setMode(mode: 'live' | 'ondemand'): void {
+    this.mode = mode;
+  }
 
   classify(snapshot: TelemetrySnapshot): StallDiagnosis {
     // A tick with no elapsed wall time carries no information — the first
@@ -154,7 +167,14 @@ export class StallClassifier {
     // Requiring readyState >= 3 avoids nudging a decoder that simply has not
     // been handed enough data yet.
     if (snapshot.bufferedAhead >= 0.6 && snapshot.readyState >= 3) {
-      if (this.stallTicks >= 2) {
+      // "Frozen" has to mean frozen. The only test used to be how many ticks
+      // had elapsed, so anything below 65% of realtime became a DECODER_FREEZE
+      // on the second tick -- which both nudged the decoder of a stream that
+      // was merely slow, and made the stutter escalation below dead code, since
+      // the counter could never reach two.
+      const effectivelyFrozen = snapshot.progressRatio < MICRO_STUTTER_RATIO;
+
+      if (effectivelyFrozen && this.stallTicks >= 2) {
         eventBus.emit('STALL_CLASSIFIED', {
           type: 'DECODER_FREEZE',
           bufferedAhead: snapshot.bufferedAhead,
@@ -171,20 +191,18 @@ export class StallClassifier {
         };
       }
 
-      // One slow tick with a full buffer is a stutter, not a freeze. Reporting
+      // Slow but moving, with a full buffer: a stutter, not a freeze. Reporting
       // it lets the HUD stay honest without provoking a seek the viewer would
-      // see as a jump.
+      // see as a jump. Four such ticks in a row is a stream this device cannot
+      // sustain, so drop a rendition rather than keep limping.
       this.consecutiveStutterTicks++;
       return {
         type: 'MICRO_STUTTER',
-        severity: 'LOW',
+        severity: this.consecutiveStutterTicks >= 4 ? 'MEDIUM' : 'LOW',
         stallTicks: this.stallTicks,
         starvationTicks: this.starvationTicks,
         stallDurationSec,
-        recommendedAction:
-          this.consecutiveStutterTicks >= 4 || snapshot.progressRatio < MICRO_STUTTER_RATIO
-            ? 'DOWN_SWITCH'
-            : 'NONE',
+        recommendedAction: this.consecutiveStutterTicks >= 4 ? 'DOWN_SWITCH' : 'NONE',
         reason: `Playback running at ${Math.round(snapshot.progressRatio * 100)}% of realtime`
       };
     }
@@ -214,12 +232,19 @@ export class StallClassifier {
       this.starvationTicks++;
 
       // Escalation is driven by elapsed seconds rather than tick count so the
-      // thresholds mean the same thing regardless of timer jitter.
+      // thresholds mean the same thing regardless of timer jitter. On-demand
+      // content gets a much longer runway: a live source that is still silent
+      // after 6s is almost certainly dead, but an episode can legitimately
+      // still be pulling toward its moov atom at that point.
+      const criticalAt = this.mode === 'ondemand' ? 20 : 6;
+      const highAt = this.mode === 'ondemand' ? 10 : 3;
+      const reloadAt = this.mode === 'ondemand' ? 8 : 2.5;
+
       const severity =
-        stallDurationSec >= 6 ? 'CRITICAL' : stallDurationSec >= 3 ? 'HIGH' : 'LOW';
+        stallDurationSec >= criticalAt ? 'CRITICAL' : stallDurationSec >= highAt ? 'HIGH' : 'LOW';
 
       const recommendedAction: RecoveryActionType =
-        stallDurationSec >= 6 ? 'FAILOVER_SOURCE' : stallDurationSec >= 2.5 ? 'HLS_RELOAD' : 'NONE';
+        stallDurationSec >= criticalAt ? 'FAILOVER_SOURCE' : stallDurationSec >= reloadAt ? 'HLS_RELOAD' : 'NONE';
 
       eventBus.emit('STALL_CLASSIFIED', {
         type: 'NETWORK_STARVATION',

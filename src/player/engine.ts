@@ -13,7 +13,9 @@ import { buildFailoverLadder, FailoverCandidate } from './failover-ladder';
 import { getProxiedUrl, shouldProxy } from '../services/proxy';
 import { channelReliability } from '../state/channel-health';
 import { playbackDiagnostics } from './diagnostics';
+import { containerOf, isUnplayableContainer } from './container-support';
 import { seriesContext } from '../state/series-context';
+import { playInNativePlayer } from '../services/native-player';
 
 /**
  * How long a load may sit without producing a single rendered frame before it is
@@ -39,7 +41,24 @@ const STARTUP_TIMEOUT_MS = 12000;
  */
 const MIN_STARTUP_TIMEOUT_MS = 6000;
 
-function startupBudgetForRung(rung: number): number {
+/**
+ * On-demand budgets: episodes and movies are progressive downloads, not a
+ * live zap. A panel that has not remuxed its library with the moov atom at
+ * the front of the file (common on budget Xtream resellers) forces the
+ * browser to keep pulling data before it can even report a duration, and
+ * that legitimately takes longer than any live channel's healthy startup --
+ * confirmed on-device against a real provider, where the same file that
+ * timed out at 6s under the live budget went on to buffer and play once
+ * given more runway. Reusing the live budget here is what made a working
+ * stream look like an unsupported container.
+ */
+const ONDEMAND_STARTUP_TIMEOUT_MS = 30000;
+const ONDEMAND_MIN_STARTUP_TIMEOUT_MS = 20000;
+
+function startupBudgetForRung(rung: number, isOnDemand: boolean): number {
+  if (isOnDemand) {
+    return Math.max(ONDEMAND_MIN_STARTUP_TIMEOUT_MS, ONDEMAND_STARTUP_TIMEOUT_MS - rung * 2000);
+  }
   return Math.max(MIN_STARTUP_TIMEOUT_MS, STARTUP_TIMEOUT_MS - rung * 2000);
 }
 
@@ -290,6 +309,17 @@ export class QuantumStreamEngine {
   }
 
   /**
+   * Whether the currently loaded source is an episode or movie rather than a
+   * live channel. currentChannelIndex keeps pointing at the last live channel
+   * tuned even while on-demand content plays, so callers that need to know
+   * what is actually on screen right now (the P+/P- zap guard, HUD labels)
+   * should ask this instead of reading the channel list.
+   */
+  isOnDemandActive(): boolean {
+    return this.currentIsOnDemand;
+  }
+
+  /**
    * Entry point for a user-initiated tune. Resets all failover state and builds
    * a fresh ladder for the channel.
    */
@@ -336,6 +366,49 @@ export class QuantumStreamEngine {
     const isOnDemand = /\/(series|movie)\//i.test(url);
     this.currentIsOnDemand = isOnDemand;
 
+    // A container the element cannot demux will not become playable by being
+    // requested four different ways. Deciding here turns twenty seconds of
+    // spinner-then-failure into an immediate, accurate answer -- and on Android,
+    // into the title actually playing, in an app that can decode it.
+    //
+    // On-demand only. Live streams go through hls.js, which demuxes containers
+    // the element cannot open by itself, so judging them by extension here would
+    // strand the whole live catalogue.
+    if (isOnDemand && isUnplayableContainer(containerOf(url))) {
+      this.currentSourceUrl = url;
+      this.currentTargetUrl = url;
+      playbackDiagnostics.recordRung({
+        sourceName: `Unsupported container (.${containerOf(url)})`,
+        url,
+        proxied: false,
+        reason: 'container_not_decodable'
+      });
+
+      const title = episode?.title || channel?.name || 'this title';
+      const contentId = episode?.id || channel?.id || '';
+      const resumeSec = (contentId && seriesContext.getResume(contentId)?.positionSec) || 0;
+      const thumbUrl = episode?.thumb || channel?.cover || channel?.logo || '';
+
+      // Prefer playing it ourselves: ExoPlayer's Matroska extractor decodes
+      // what this WebView never could. Only hand off to another app when this
+      // build has no native player bridge (older APK, or a plain browser).
+      if (playInNativePlayer(url, title, resumeSec, contentId, thumbUrl)) {
+        this.showSpinner(false);
+        playbackDiagnostics.end('PLAYING');
+        return;
+      }
+
+      if (this.handOffToExternalPlayer(url, title)) {
+        playbackDiagnostics.end('PLAYING');
+        return;
+      }
+
+      this.showSpinner(false);
+      playbackDiagnostics.end('FAILED');
+      this.showOfflineOverlay(channel);
+      return;
+    }
+
     if (isOnDemand) {
       this.ladder = buildOnDemandLadder(url);
     } else {
@@ -369,12 +442,21 @@ export class QuantumStreamEngine {
    * on-demand content that meant an episode never got its proxied or
    * alternate-container retry, and simply refused to play.
    */
-  handleVideoElementError(generation?: number): void {
-    if (!this.currentSourceUrl) return;
-    // Every other error path is generation-guarded; without the same check a
-    // late error from a source the viewer already left burns a rung of the
-    // attempt that replaced it.
-    if (typeof generation === 'number' && generation !== this.loadGeneration) return;
+  handleVideoElementError(): void {
+    if (!this.currentSourceUrl || !this.video) return;
+
+    // The element has to actually be in an error state. This used to take a
+    // generation argument and compare it against this.loadGeneration, but the
+    // caller is a permanent listener that could only ever read the live value,
+    // so it compared a number with itself and filtered nothing -- and load()
+    // attaches synchronously, so there is no window in which a generation could
+    // have told a stale error from a current one anyway. What can be checked is
+    // whether HTMLMediaElement.error is set, which the browser does before it
+    // fires the event; a call without it is spurious and must not cost a rung.
+    if (!this.video.error) return;
+
+    // Repeat errors within one attempt are absorbed by advanceLadder(), which
+    // moves on once per generation.
     this.advanceLadder('video_element_error');
   }
 
@@ -474,26 +556,48 @@ export class QuantumStreamEngine {
     if (this.probesThisAttempt >= MAX_PROBES_PER_ATTEMPT) return;
     this.probesThisAttempt++;
 
-    const annotate = (patch: { httpStatus?: number; httpNote?: string }) =>
+    const annotate = (patch: { httpStatus?: number; httpNote?: string; servedMedia?: boolean }) =>
       playbackDiagnostics.annotateRung(rungId, patch);
+
+    /**
+     * Records what the origin returned, and whether it was actually media.
+     *
+     * A status code alone is not enough. Asked for a container it does not hold,
+     * a real Xtream panel answers `200 OK` with `text/html` and an empty body
+     * rather than a 404 -- so the speculative .mp4/.m4v/.mov rungs all came back
+     * "200" and the diagnosis concluded the provider had served the file and the
+     * device could not decode it, burying the one useful fact: the title is
+     * Matroska and was never going to play.
+     */
+    const record = (resp: Response) => {
+      const type = resp.headers.get('content-type') || '';
+      const length = Number(resp.headers.get('content-length') || '0');
+      const isMedia = /^(video|audio|application\/(octet-stream|vnd\.apple\.mpegurl|x-mpegurl|dash\+xml))/i.test(type);
+      const emptyBody = resp.status === 200 && length === 0 && !/^video|^audio/i.test(type);
+      annotate({
+        httpStatus: resp.status,
+        httpNote: emptyBody ? `${type || 'no content-type'} (empty)` : type || undefined,
+        servedMedia: resp.ok && isMedia && !emptyBody
+      });
+    };
 
     const rangedGet = () =>
       fetch(targetUrl, { method: 'GET', headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(6000) })
-        .then(resp => annotate({ httpStatus: resp.status, httpNote: resp.headers.get('content-type') || undefined }))
-        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed' }));
+        .then(record)
+        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed', servedMedia: false }));
 
     try {
       fetch(targetUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
         .then(resp => {
           // 405/501 mean the panel refuses HEAD, not that the asset is missing.
           if (resp.status === 405 || resp.status === 501) return rangedGet();
-          annotate({ httpStatus: resp.status, httpNote: resp.headers.get('content-type') || undefined });
+          record(resp);
         })
         // A network-level rejection is not evidence that HEAD is unsupported,
         // and retrying with a GET would spend another connection on an account
         // that may only allow one -- manufacturing the very 403 that explain()
         // would then report as bad credentials.
-        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed' }));
+        .catch((err: any) => annotate({ httpStatus: 0, httpNote: err?.name || 'fetch failed', servedMedia: false }));
     } catch {
       /* fetch unavailable */
     }
@@ -527,6 +631,7 @@ export class QuantumStreamEngine {
 
     // Restart telemetry so stall counters and recovery budgets from the previous
     // stream do not carry into this one.
+    this.watchdog.setContentMode(this.currentIsOnDemand ? 'ondemand' : 'live');
     this.watchdog.start();
     this.armStartupTimer(generation, sourceName);
 
@@ -617,7 +722,7 @@ export class QuantumStreamEngine {
    * happens at all.
    */
   private armStartupTimer(generation: number, sourceName: string): void {
-    const budget = startupBudgetForRung(Math.max(0, this.ladderIndex));
+    const budget = startupBudgetForRung(Math.max(0, this.ladderIndex), this.currentIsOnDemand);
     this.startupTimer = setTimeout(() => {
       if (generation !== this.loadGeneration) return;
       if (this.hasRenderedFrame) return;
@@ -814,6 +919,23 @@ export class QuantumStreamEngine {
     if (!hudRes || !this.video) return;
     if (this.video.videoWidth) {
       hudRes.textContent = `${this.video.videoHeight}p`;
+    }
+  }
+
+  /**
+   * Asks the Android app to open a stream in a player that can decode it.
+   *
+   * @returns false on the web, or when no installed app offers to handle it.
+   */
+  private handOffToExternalPlayer(url: string, title: string): boolean {
+    const native = (window as any).AndroidTvNative;
+    if (!native || typeof native.openInExternalPlayer !== 'function') return false;
+    try {
+      if (!native.openInExternalPlayer(url, title)) return false;
+      this.showToast(`Opening "${title}" in an external player…`, 'info');
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 

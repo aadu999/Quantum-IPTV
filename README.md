@@ -1,6 +1,6 @@
 # Quantum IPTV 🚀
 
-[![Release](https://img.shields.io/badge/Release-v2.1.0--beta-blue.svg)](https://github.com/aadu999/Quantum-IPTV/releases/tag/v2.1.0-beta)
+[![Release](https://img.shields.io/badge/Release-v2.2.0-blue.svg)](https://github.com/aadu999/Quantum-IPTV/releases/tag/v2.2.0)
 [![Platform](https://img.shields.io/badge/Platform-Android%20TV%20%7C%20Web-green.svg)](https://github.com/aadu999/Quantum-IPTV)
 [![Author](https://img.shields.io/badge/Author-Adarsh%20Raveendran-orange.svg)](https://github.com/aadu999)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
@@ -13,19 +13,25 @@ Next-generation high-performance IPTV & VoD streaming platform meticulously engi
 
 You can download and install the pre-built beta release directly on your Android TV, Smart TV Box, or Android phone:
 
-* 🚀 **[Direct Download Quantum IPTV v2.1.0-beta APK](https://raw.githubusercontent.com/aadu999/Quantum-IPTV/feature/android-tv-apk/releases/Quantum-IPTV-v2.1.0-beta.apk)**
-* 📦 **[GitHub Releases Download](https://github.com/aadu999/Quantum-IPTV/releases/download/v2.1.0-beta/Quantum-IPTV-v2.1.0-beta.apk)**
+* 🚀 **[Direct Download Quantum IPTV v2.2.0 APK](https://raw.githubusercontent.com/aadu999/Quantum-IPTV/feature/android-tv-apk/releases/Quantum-IPTV-v2.2.0.apk)**
+* 📦 **[GitHub Releases Download](https://github.com/aadu999/Quantum-IPTV/releases/download/v2.2.0/Quantum-IPTV-v2.2.0.apk)**
 
-> **Tip for Android TV / Fire TV Users**: You can enter the direct download link into the **Downloader** app on your TV, or copy `releases/Quantum-IPTV-v2.1.0-beta.apk` to a USB drive / install via ADB:
+> **Tip for Android TV / Fire TV Users**: You can enter the direct download link into the **Downloader** app on your TV, or copy `releases/Quantum-IPTV-v2.2.0.apk` to a USB drive / install via ADB:
 > ```bash
-> adb install -r Quantum-IPTV-v2.1.0-beta.apk
+> adb install -r Quantum-IPTV-v2.2.0.apk
 > ```
+
+> **Signing**: the attached APK is signed with the Android **debug** certificate, because
+> no release keystore was configured when it was built. It installs and runs fine by
+> sideload, which is how most Android TV boxes take it — but it cannot be published to
+> Play, and it should not be treated as a distributable artifact. To produce one, build
+> from source with a keystore configured; see **Signing a release build** below.
 
 ---
 
-## ✨ Key Features in v2.1.0-beta
+## ✨ Key Features in v2.2.0
 
-## 🧠 Playback Resilience Core (unreleased)
+## 🧠 Playback Resilience Core
 
 The streaming engine is built around a strict observe → diagnose → recover → fail over
 pipeline. Each stage is isolated, so diagnosis stays side-effect free and only the
@@ -50,13 +56,23 @@ recovery planner is allowed to touch playback.
   persisted across sessions and used to seed ABR so the first fragment is chosen from
   evidence rather than a blind default.
 
-### 📡 Quant Remote over the local network
+### 📡 Quant Remote, served by the television
 
-The companion remote negotiates a **direct WebRTC DataChannel** with the TV, using the
-MQTT broker only to introduce the two devices. On the same Wi-Fi, commands travel
-device-to-device in single-digit milliseconds, the full catalogue syncs without the
-broker's payload caps, and provider credentials never touch the public broker. MQTT
-remains as an automatic fallback where peer-to-peer traffic is blocked.
+On the Android app the TV **serves the remote itself**. It opens a port on the local
+network, hands the phone the remote interface straight out of the APK, and takes commands
+back over plain HTTP — so pairing needs no internet at all, and neither the catalogue nor
+the provider credentials ever leave the house.
+
+The QR code encodes the TV's own LAN address together with a pairing secret, re-resolved
+each time it is shown so a network change cannot produce a code that scans and then times
+out. Every request must present that secret. When this path is available the public broker
+and the WebRTC handshake are not started at all.
+
+Where a port cannot be opened — the browser build, or a phone on a different network — the
+remote falls back to a **direct WebRTC DataChannel**, with the MQTT broker used only to
+introduce the two devices. Signalling is signed with the same pairing secret, so knowing
+the room id is not enough to drive someone's television, and stream URLs are stripped of
+account credentials before anything is relayed.
 
 The remote also gains language, group and sort filters built from the live catalogue,
 plus a favourites-only toggle.
@@ -80,7 +96,11 @@ normalised display name.
 
 ### 🎬 Intelligent VoD & Series Interface
 - **Balanced Dialog Sizing**: Proportionate modal info dialogs for Movies & TV Series with responsive sizing that won't overwhelm TV screens.
-- **Episode Switching & Metadata**: Dynamic series episodes info and fast switching between titles.
+- **Season and episode browsing**: seasons, per-episode stills, plot, duration and a watched-progress bar, with a labelled placeholder when a provider publishes no still.
+- **Resume and autoplay**: every title remembers where it was left off, and finishing an episode rolls into the next one in the season. Resume points are traded directly between paired devices over the local link, so a phone and a TV agree without any account or cloud service.
+- **Browsing never disturbs playback**: opening the explorer to look at another season does not change what is on screen, what plays next, or where the current title's position is recorded.
+- **Dead channels ranked down**: channels that repeatedly fail to play are badged and sorted to the bottom of their category instead of being presented as working.
+- **Failure diagnosis**: when something genuinely cannot play, the app says why — provider rejection, an unpublished episode, an undecodable container — rather than showing a spinner and then nothing. `quantumDiagnostics()` in the console prints a shareable, credential-redacted report.
 - **Dedicated Seek Focus**: Video timeline seeking is restricted to intentional seekbar selection, avoiding accidental skipping during channel browsing.
 
 ### ⚡ Offline Styling & Zero-FOUT
@@ -93,7 +113,7 @@ normalised display name.
 - **Xtream Codes & M3U8 Integration**: Robust support for M3U playlists and Xtream API authentication.
 - **Selective Live Channel Filtering**: Configurable option to filter live channels from Xtream while preserving M3U playlists.
 - **CORS & TS Stream Proxying**: Built-in proxy fallback support for stubborn transport streams.
-- **IoT Remote Pairing**: Real-time companion mobile remote control powered by MQTT and QR-code pairing.
+- **Remote pairing**: QR-code pairing to a companion phone remote, served over the LAN by the television itself where possible and relayed only as a fallback.
 
 ---
 
@@ -103,7 +123,7 @@ normalised display name.
   * Email: [hello@adarsh.one](mailto:hello@adarsh.one)
   * GitHub: [@aadu999](https://github.com/aadu999)
   * Repository: [https://github.com/aadu999/Quantum-IPTV](https://github.com/aadu999/Quantum-IPTV)
-* **Version**: `2.1.0-beta` (Build `2`)
+* **Version**: `2.2.0` (Build `3`)
 * **Framework**: Capacitor 8 + Vite + TypeScript + Tailwind CSS
 
 ---
@@ -128,10 +148,37 @@ npm install
 npm run build
 npx cap sync android
 
-# 4. Compile Signed Release APK
+# 4. Compile the release APK
 cd android
 ./gradlew assembleRelease
 
 # The generated APK will be at:
 # android/app/build/outputs/apk/release/app-release.apk
 ```
+
+### Signing a release build
+
+Without a keystore the release build is signed with the Android debug certificate and
+warns loudly that the result must not be distributed. To produce a publishable APK,
+supply a keystore either through the environment:
+
+```bash
+export QUANTUM_KEYSTORE_FILE=/secure/path/quantum-release.jks
+export QUANTUM_KEYSTORE_PASSWORD=...
+export QUANTUM_KEY_ALIAS=...
+export QUANTUM_KEY_PASSWORD=...
+cd android && ./gradlew assembleRelease
+```
+
+or through `android/keystore.properties` (git-ignored, alongside `*.jks` and
+`*.keystore`):
+
+```properties
+storeFile=/secure/path/quantum-release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+Keep the keystore outside the repository and back it up: Android identifies an app by its
+signing certificate, and losing it means no future build can update an existing install.

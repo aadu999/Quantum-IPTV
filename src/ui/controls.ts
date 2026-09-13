@@ -1,4 +1,5 @@
 import { state } from '../state/store';
+import { Channel } from '../types';
 import { QuantumStreamEngine } from '../player/engine';
 import { broadcastTVState } from '../services/remote';
 import { circuitBreaker } from '../player/circuit-breaker';
@@ -347,6 +348,8 @@ export function handleSeekBarClick(e: MouseEvent): void {
 
 
 let lastResumeWriteAt = 0;
+/** The engine load a resume point has already been applied to. */
+let resumeAppliedForGeneration = -1;
 
 /**
  * Stores where the viewer has got to in the current episode.
@@ -355,28 +358,57 @@ let lastResumeWriteAt = 0;
  * fires several times a second, and the resume map is persisted to
  * localStorage.
  */
-function recordResumeProgress(positionSec: number, durationSec: number): void {
-  const ctx = seriesContext.current;
-  const ep = seriesContext.currentEpisode;
-  if (!ctx || !ep) return;
+export function recordResumeProgress(positionSec: number, durationSec: number): void {
   if (!durationSec || !isFinite(durationSec) || durationSec <= 0) return;
 
   const now = Date.now();
   if (now - lastResumeWriteAt < 5000) return;
-  lastResumeWriteAt = now;
 
+  const ep = seriesContext.currentEpisode;
+  const ctx = seriesContext.playbackContext;
+
+  if (ep && ctx) {
+    lastResumeWriteAt = now;
+    seriesContext.recordProgress({
+      contentId: ep.id,
+      title: ep.title,
+      seriesId: ctx.seriesId,
+      seriesName: ctx.seriesName,
+      season: ep.season,
+      episodeNum: ep.episodeNum,
+      url: ep.url,
+      thumb: ep.thumb,
+      positionSec,
+      durationSec
+    });
+    return;
+  }
+
+  // A film gets its own resume point under its own id. It used to be filed
+  // under whichever episode the viewer had last browsed to, which both lost the
+  // film's position and corrupted the episode's.
+  const movie = currentOnDemandChannel();
+  if (!movie) return;
+  lastResumeWriteAt = now;
   seriesContext.recordProgress({
-    contentId: ep.id,
-    title: ep.title,
-    seriesId: ctx.seriesId,
-    seriesName: ctx.seriesName,
-    season: ep.season,
-    episodeNum: ep.episodeNum,
-    url: ep.url,
-    thumb: ep.thumb,
+    contentId: movie.id,
+    title: movie.name,
+    url: movie.url,
+    thumb: movie.logo,
     positionSec,
     durationSec
   });
+}
+
+/**
+ * The channel on screen, when it is an on-demand title rather than a live one.
+ * Live streams have no meaningful position to return to.
+ */
+function currentOnDemandChannel(): Channel | null {
+  const ch = state.filteredChannels[state.currentChannelIndex] || null;
+  if (!ch || !ch.id || !ch.url) return null;
+  const isOnDemand = ch.type === 'vod' || !!ch.vodId || /\/movie\//i.test(ch.url);
+  return isOnDemand ? ch : null;
 }
 
 /**
@@ -384,9 +416,19 @@ function recordResumeProgress(positionSec: number, durationSec: number): void {
  * frame of a newly loaded episode.
  */
 export function applyResumePosition(): void {
-  const ep = seriesContext.currentEpisode;
-  if (!ep || !engineInstance?.video) return;
-  const point = seriesContext.getResume(ep.id);
+  const target = seriesContext.currentEpisode || currentOnDemandChannel();
+  if (!target || !engineInstance?.video) return;
+
+  // Once per load, not once per `playing` event. The element fires `playing`
+  // again after every pause and every seek, so re-seeking here dragged the
+  // viewer back to the resume point each time they tried to move. Keyed on the
+  // engine's load generation rather than the title, so returning to something
+  // watched earlier in the session still resumes.
+  const generation = engineInstance.currentLoadGeneration;
+  if (resumeAppliedForGeneration === generation) return;
+  resumeAppliedForGeneration = generation;
+
+  const point = seriesContext.getResume(target.id);
   if (!point || point.positionSec < 30) return;
 
   const video = engineInstance.video;
@@ -415,13 +457,19 @@ export function applyResumePosition(): void {
  */
 export function handleEpisodeEnded(): void {
   const ep = seriesContext.currentEpisode;
-  if (ep) seriesContext.markFinished(ep.id);
+  // Nothing to continue when a film or a live stream ends. This used to consult
+  // the browse context, so finishing a film started an episode of whichever
+  // series the viewer had last opened in the explorer.
+  if (!ep) {
+    const movie = currentOnDemandChannel();
+    if (movie) seriesContext.markFinished(movie.id);
+    return;
+  }
 
-  const next = seriesContext.nextEpisode;
+  seriesContext.markFinished(ep.id);
+  const next = seriesContext.advancePlayback();
   if (!next) return;
 
-  const ctx = seriesContext.current;
-  if (ctx) seriesContext.setIndex(ctx.index + 1);
   engineInstance?.showToast(`Up next: ${next.title}`, 'info');
   (window as any).playEpisodeRef?.(next);
 }

@@ -1,8 +1,12 @@
 package com.quantum.iptv;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.PictureInPictureParams;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.media.AudioManager;
@@ -19,6 +23,10 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.content.ContextCompat;
+
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
@@ -28,8 +36,12 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -41,6 +53,107 @@ public class MainActivity extends BridgeActivity {
     private OkHttpClient httpClient;
     private long lastBackPressTime = 0;
     private Toast exitToast;
+    private QuantumLanRemoteServer lanRemoteServer;
+
+    /**
+     * Keycodes the web layer has said it will handle itself.
+     *
+     * Replaced wholesale rather than mutated: it is written from the JavaScript
+     * bridge thread and read on the UI thread during key dispatch, and swapping
+     * an immutable snapshot needs no lock and no concurrent collection (whose
+     * newKeySet() is API 24 anyway, above this app's minimum of 23).
+     */
+    private volatile Set<Integer> claimedKeyCodes = Collections.emptySet();
+
+    private BroadcastReceiver nativePlayerProgressReceiver;
+
+    /**
+     * Must be registered before onStart() -- doing it as a field initializer
+     * runs it during construction, which is always early enough.
+     */
+    private final ActivityResultLauncher<Intent> nativePlayerLauncher = registerForActivityResult(
+        new ActivityResultContracts.StartActivityForResult(),
+        result -> {
+            Intent data = result.getData();
+            WebView webView = this.getBridge().getWebView();
+            if (webView == null || data == null) return;
+            String episodeId = data.getStringExtra(NativePlayerActivity.RESULT_EXTRA_EPISODE_ID);
+            double positionSec = data.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_POSITION_SEC, 0);
+            double durationSec = data.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_DURATION_SEC, 0);
+            boolean completed = data.getBooleanExtra(NativePlayerActivity.RESULT_EXTRA_COMPLETED, false);
+            String error = data.getStringExtra(NativePlayerActivity.RESULT_EXTRA_ERROR);
+            webView.evaluateJavascript(
+                "window.onNativePlayerEnded && window.onNativePlayerEnded("
+                    + jsonStringLiteral(episodeId == null ? "" : episodeId) + ", "
+                    + positionSec + ", "
+                    + durationSec + ", "
+                    + completed + ", "
+                    + (error == null ? "null" : jsonStringLiteral(error))
+                    + ");",
+                null);
+        }
+    );
+
+    /**
+     * Brings up the on-device remote server and hands commands it receives to
+     * the web layer, which already knows how to act on them.
+     */
+    private String startLanRemoteServer(String pairingSecret) {
+        if (lanRemoteServer == null) {
+            lanRemoteServer = new QuantumLanRemoteServer(this, json -> runOnUiThread(() -> {
+                WebView webView = this.getBridge().getWebView();
+                if (webView == null) return;
+                // Passed as a JSON string literal rather than spliced in raw: the
+                // body arrives from the network, and pasting it into a script
+                // would make any phone on the Wi-Fi able to run code in the app.
+                webView.evaluateJavascript(
+                    "window.onLanRemoteCommand && window.onLanRemoteCommand(" + jsonStringLiteral(json) + ");", null);
+            }));
+        }
+        return lanRemoteServer.start(pairingSecret);
+    }
+
+    /** Best-guess MIME type from a stream URL's extension. */
+    private static String mimeForUrl(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        int q = lower.indexOf('?');
+        if (q >= 0) lower = lower.substring(0, q);
+        if (lower.endsWith(".mkv")) return "video/x-matroska";
+        if (lower.endsWith(".avi")) return "video/x-msvideo";
+        if (lower.endsWith(".mp4") || lower.endsWith(".m4v")) return "video/mp4";
+        if (lower.endsWith(".mov")) return "video/quicktime";
+        if (lower.endsWith(".ts") || lower.endsWith(".m2ts")) return "video/mp2t";
+        if (lower.endsWith(".m3u8")) return "application/x-mpegURL";
+        if (lower.endsWith(".webm")) return "video/webm";
+        if (lower.endsWith(".flv")) return "video/x-flv";
+        if (lower.endsWith(".wmv")) return "video/x-ms-wmv";
+        return "video/*";
+    }
+
+    /** Quotes arbitrary text as a JavaScript string literal. */
+    private static String jsonStringLiteral(String raw) {
+        StringBuilder sb = new StringBuilder(raw.length() + 16);
+        sb.append('"');
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    // Escape controls, and the line separators that are legal in
+                    // JSON but terminate a JavaScript string literal.
+                    if (c < 0x20 || c == 0x2028 || c == 0x2029) {
+                        sb.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.append('"').toString();
+    }
 
     public class AndroidTvNativeBridge {
         @JavascriptInterface
@@ -150,6 +263,132 @@ public class MainActivity extends BridgeActivity {
             return true;
         }
 
+        /**
+         * Starts serving the Quant Remote off this television.
+         *
+         * @return the base URL a phone should open, or "" when no LAN address or
+         *         port was available -- the web layer then falls back to the
+         *         broker-relayed remote.
+         */
+        @JavascriptInterface
+        public String startLanRemoteServer(String pairingSecret) {
+            String url = MainActivity.this.startLanRemoteServer(pairingSecret);
+            return url == null ? "" : url;
+        }
+
+        @JavascriptInterface
+        public void stopLanRemoteServer() {
+            if (lanRemoteServer != null) lanRemoteServer.stop();
+        }
+
+        /** Makes the latest value of a topic available to polling remotes. */
+        @JavascriptInterface
+        public void publishLanTopic(String topic, String json) {
+            if (lanRemoteServer != null) lanRemoteServer.publish(topic, json);
+        }
+
+        /**
+         * Records which remote keycodes the web layer will consume, as a
+         * comma-separated list. dispatchKeyEvent() has to decide synchronously
+         * whether to swallow a key, and evaluateJavascript() cannot answer in
+         * time, so the web layer publishes the set up front instead.
+         */
+        /**
+         * Hands a stream to whatever app on the device can play it.
+         *
+         * Providers publish a great deal of Matroska, which no WebView can
+         * decode however good the codec inside is -- on one real account 84% of
+         * series episodes were .mkv. Those titles are not broken, they are
+         * simply not playable *here*; VLC or MX Player handle them without
+         * complaint. Passing the stream out is the difference between a dead
+         * catalogue entry and a watchable episode.
+         *
+         * @return false when nothing on the device offers to handle it, so the
+         *         web layer can say so rather than appearing to do nothing.
+         */
+        @JavascriptInterface
+        public boolean openInExternalPlayer(String url, String title) {
+            if (url == null || url.isEmpty()) return false;
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                // A concrete type gets the intent in front of video players;
+                // several ignore a bare ACTION_VIEW on an unknown extension.
+                intent.setDataAndType(Uri.parse(url), mimeForUrl(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                intent.putExtra("title", title == null ? "" : title);
+                // The extras MX Player and VLC read for a display title.
+                intent.putExtra("secure_uri", true);
+
+                if (intent.resolveActivity(getPackageManager()) == null) return false;
+                startActivity(intent);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        /**
+         * Plays a stream ExoPlayer can decode natively that this WebView's
+         * &lt;video&gt; element cannot -- chiefly Matroska. Preferred over
+         * openInExternalPlayer when available: the title plays inside the app
+         * instead of handing off to VLC/MX Player, or failing outright when
+         * neither is installed.
+         *
+         * @return false only when the URL is empty; launching the activity
+         *         cannot fail synchronously the way resolveActivity() can for
+         *         an external app, so there is nothing else to check here.
+         */
+        @JavascriptInterface
+        public boolean playInNativePlayer(String url, String title, double startPositionSec, String episodeId, String thumbUrl) {
+            if (url == null || url.isEmpty()) return false;
+            runOnUiThread(() -> {
+                Intent intent = new Intent(MainActivity.this, NativePlayerActivity.class);
+                intent.putExtra(NativePlayerActivity.EXTRA_URL, url);
+                intent.putExtra(NativePlayerActivity.EXTRA_TITLE, title == null ? "" : title);
+                intent.putExtra(NativePlayerActivity.EXTRA_START_POSITION_SEC, startPositionSec);
+                intent.putExtra(NativePlayerActivity.EXTRA_EPISODE_ID, episodeId == null ? "" : episodeId);
+                intent.putExtra(NativePlayerActivity.EXTRA_THUMB_URL, thumbUrl == null ? "" : thumbUrl);
+                nativePlayerLauncher.launch(intent);
+                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+            });
+            return true;
+        }
+
+        @JavascriptInterface
+        public void setClaimedTvKeyCodes(String csv) {
+            Set<Integer> next = new HashSet<>();
+            if (csv != null) {
+                for (String part : csv.split(",")) {
+                    String trimmed = part.trim();
+                    if (trimmed.isEmpty()) continue;
+                    try {
+                        next.add(Integer.parseInt(trimmed));
+                    } catch (NumberFormatException ignored) {
+                        // A malformed entry must not drop the rest of the map.
+                    }
+                }
+            }
+            claimedKeyCodes = Collections.unmodifiableSet(next);
+        }
+
+        @JavascriptInterface
+        public boolean isLanRemoteServerRunning() {
+            return lanRemoteServer != null && lanRemoteServer.isRunning();
+        }
+
+        /**
+         * Re-derives the URL rather than echoing the one start() returned: a
+         * television that changes network keeps the same open port but answers
+         * on a different address, and a QR code showing the old one scans fine
+         * and then times out.
+         */
+        @JavascriptInterface
+        public String getLanRemoteServerUrl() {
+            if (lanRemoteServer == null || !lanRemoteServer.isRunning()) return "";
+            String url = lanRemoteServer.currentUrl();
+            return url == null ? "" : url;
+        }
+
         @JavascriptInterface
         public void toggleMute() {
             runOnUiThread(() -> {
@@ -257,6 +496,44 @@ public class MainActivity extends BridgeActivity {
             this.getBridge().setWebViewClient(tvClient);
             webView.setWebViewClient(tvClient);
         }
+
+        nativePlayerProgressReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                WebView bridgeWebView = MainActivity.this.getBridge().getWebView();
+                if (bridgeWebView == null) return;
+                String episodeId = intent.getStringExtra(NativePlayerActivity.RESULT_EXTRA_EPISODE_ID);
+                double positionSec = intent.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_POSITION_SEC, 0);
+                double durationSec = intent.getDoubleExtra(NativePlayerActivity.RESULT_EXTRA_DURATION_SEC, 0);
+                bridgeWebView.evaluateJavascript(
+                    "window.onNativePlayerProgress && window.onNativePlayerProgress("
+                        + jsonStringLiteral(episodeId == null ? "" : episodeId) + ", "
+                        + positionSec + ", "
+                        + durationSec + ");",
+                    null);
+            }
+        };
+        ContextCompat.registerReceiver(
+            this,
+            nativePlayerProgressReceiver,
+            new IntentFilter(NativePlayerActivity.ACTION_PROGRESS),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        );
+    }
+
+    @Override
+    public void onDestroy() {
+        // The socket outlives the activity otherwise, and the next launch finds
+        // its port taken and quietly serves the remote one port over.
+        if (lanRemoteServer != null) {
+            lanRemoteServer.stop();
+            lanRemoteServer = null;
+        }
+        if (nativePlayerProgressReceiver != null) {
+            unregisterReceiver(nativePlayerProgressReceiver);
+            nativePlayerProgressReceiver = null;
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -417,17 +694,42 @@ public class MainActivity extends BridgeActivity {
             // Offer every remaining keycode to the web layer before falling through.
             // OEM remotes emit vendor-specific codes for P+/P-, GUIDE and colour
             // buttons that are not in the AOSP constant set, so the switch above
-            // can never be exhaustive. onNativeTvKey() consults a runtime-editable
-            // map and reports back whether it consumed the key; anything it does
-            // not claim still reaches the WebView as a normal DOM key event.
+            // can never be exhaustive.
+            //
+            // Whether the web layer consumes a key is decided from the set it
+            // published via setClaimedTvKeyCodes(), not from what
+            // onNativeTvKey() returns: evaluateJavascript() is asynchronous, so
+            // that return value arrived long after this method had to answer and
+            // was discarded. A claimed key therefore reached the WebView as a DOM
+            // event as well and was acted on twice -- one press of P+ skipping
+            // two channels. Unclaimed keys still fall through untouched.
+            if (claimedKeyCodes.contains(keyCode)) {
+                if (action == KeyEvent.ACTION_DOWN && !event.isCanceled()) {
+                    webView.evaluateJavascript(
+                        "window.onNativeTvKey && window.onNativeTvKey(" + keyCode + ");", null);
+                }
+                // The matching ACTION_UP is swallowed too, so the page never sees
+                // a keyup without its keydown.
+                return true;
+            }
+
             if (action == KeyEvent.ACTION_DOWN && !event.isCanceled()) {
+                // Unclaimed: let the web layer see it (it may learn the code for
+                // a remote we do not know yet), then pass it on as normal.
                 webView.evaluateJavascript(
-                    "window.onNativeTvKey ? window.onNativeTvKey(" + keyCode + ") : false;", null);
+                    "window.onNativeTvKey && window.onNativeTvKey(" + keyCode + ");", null);
             }
         }
         return super.dispatchKeyEvent(event);
     }
 
+    /**
+     * Back is handled entirely here: the web layer gets first refusal (to close
+     * a modal or leave fullscreen), and only a second press within 2.5s exits.
+     * Delegating to super would finish the activity on the first press, which is
+     * the behaviour this override exists to replace.
+     */
+    @SuppressLint("MissingSuperCall")
     @Override
     public void onBackPressed() {
         WebView webView = this.getBridge().getWebView();

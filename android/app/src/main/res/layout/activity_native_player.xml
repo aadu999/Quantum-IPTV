@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#020617">
+
+    <!-- Colours match the WebView player's own indigo accent (see index.html's
+         tv-focused/brand-600 styling) so the transport bar reads as this app's
+         own player, not a generic stock video-player control. -->
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/native_player_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:keepScreenOn="true"
+        app:use_controller="true"
+        app:show_buffering="when_playing"
+        app:played_color="#818cf8"
+        app:scrubber_color="#818cf8"
+        app:buffered_color="#4c1d95"
+        app:unplayed_color="#334155" />
+
+    <!--
+      Shown until the first real frame renders, so the jump from the WebView
+      to this activity reads as "loading this title" rather than a jarring
+      cut to a black screen. Same background colour as the WebView's own
+      (#020617, see capacitor.config.json) so the transition itself is
+      seamless before this overlay's content even appears.
+    -->
+    <LinearLayout
+        android:id="@+id/native_player_loading"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#020617"
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <!-- Episode/movie poster, when the API provided one; falls back to the
+             app icon below until (or if) it loads. -->
+        <ImageView
+            android:id="@+id/native_player_loading_thumb"
+            android:layout_width="180dp"
+            android:layout_height="180dp"
+            android:layout_marginBottom="20dp"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            android:contentDescription="@null" />
+
+        <ImageView
+            android:id="@+id/native_player_loading_icon"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_marginBottom="24dp"
+            android:src="@mipmap/ic_launcher_round"
+            android:contentDescription="@null" />
+
+        <ProgressBar
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginBottom="20dp"
+            android:indeterminateTint="#818cf8" />
+
+        <TextView
+            android:id="@+id/native_player_loading_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#ffffff"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Buffering…"
+            android:textColor="#94a3b8"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</FrameLayout>

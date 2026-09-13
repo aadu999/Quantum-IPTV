@@ -76,7 +76,8 @@ import {
   closeModals
 } from './ui/modals';
 import { showAppAlert, showAppConfirm, closeAppDialog } from './ui/dialog';
-import { initTvNavigation } from './ui/tv-navigation';
+import { initTvNavigation, setTvNavEngineInstance } from './ui/tv-navigation';
+import { registerNativePlayerCallbacks } from './services/native-player';
 
 // Instantiate Core Stream Engine
 const videoElement = document.getElementById('video-player') as HTMLVideoElement;
@@ -86,6 +87,8 @@ export const engine = new QuantumStreamEngine(videoElement);
 setEngineInstance(engine);
 setChannelEngineInstance(engine);
 setModalEngineInstance(engine);
+setTvNavEngineInstance(engine);
+registerNativePlayerCallbacks();
 
 // Window Attachments for Global HTML Handlers
 (window as any).engine = engine;
@@ -538,9 +541,9 @@ export function setupEventListeners(): void {
     });
     video.addEventListener('error', () => {
       // Hand this to the failover ladder rather than ending the attempt. Calling
-      // onStreamFailed() here skipped every remaining rung. The generation is
-      // passed so a stale error cannot consume a rung of a newer attempt.
-      engine.handleVideoElementError(engine.currentLoadGeneration);
+      // onStreamFailed() here skipped every remaining rung. The engine decides
+      // whether the error belongs to the attempt now running.
+      engine.handleVideoElementError();
     });
 
     // Series continuity: resume where the viewer left off, and roll into the

@@ -1,10 +1,19 @@
 import { Channel } from '../types';
-import { state, FALLBACK_LOGO } from '../state/store';
+import { state, FALLBACK_LOGO, getOrGeneratePairingSecret } from '../state/store';
 import { QuantumSessionStore } from '../state/session';
 import { parseXtreamInput, getXtreamCredentials, xtreamConnector } from './xtream';
 import { formatTimestamp } from '../ui/controls';
 import { showAppAlert } from '../ui/dialog';
 import { QuantumLanLink, LanLinkStatus } from './lan-link';
+import {
+  startTvLanServer,
+  getTvLanServerUrl,
+  publishTvLanTopic,
+  isServedByTv,
+  isLanDirectActive,
+  startRemoteLanClient,
+  sendLanCommand
+} from './lan-server';
 import { seriesContext } from '../state/series-context';
 
 // Bundled rather than loaded from a CDN: both were already package.json
@@ -62,6 +71,8 @@ function updateLanBadge(status: LanLinkStatus, detail?: string): void {
 function initLanLink(): void {
   if (lanLink) return;
   lanLink = new QuantumLanLink(state.isRemoteClient ? 'remote' : 'tv', {
+    // Carried in the pairing URL the QR code encodes, never over the broker.
+    pairingSecret: getOrGeneratePairingSecret(),
     onMessage: data => {
       if (!data) return;
       if (data.action === 'SYNC_RESUME') {
@@ -117,7 +128,40 @@ function announceLanPresence(): void {
 export function syncResumePoints(): void {
   const points = seriesContext.exportResume();
   if (points.length === 0) return;
+  if (publishTvLanTopic('resume', { points })) return;
   lanLink?.send({ action: 'SYNC_RESUME', payload: { points } });
+}
+
+
+/**
+ * Removes account credentials from a stream URL.
+ *
+ * Xtream embeds them in the path (/live/<user>/<pass>/<id>.ts) and some
+ * providers repeat them as query parameters, so both forms have to go before
+ * anything is handed to the shared broker.
+ */
+function redactUrlForRelay(url?: string): string {
+  if (!url) return '';
+  return url
+    .replace(/\/(series|movie|live)\/([^/]+)\/([^/]+)\//i, '/$1/***/***/')
+    .replace(/([?&](?:username|user|password|pass|token|mac)=)[^&#]*/gi, '$1***');
+}
+
+/**
+ * Strips provider credentials from anything bound for the shared MQTT broker.
+ *
+ * The broker is public and the room topic is guessable, so every field that can
+ * carry an account's username and password has to be scrubbed -- not just the
+ * session blob. The stream URLs in the state payload and in each catalogue chunk
+ * carry exactly the same credentials in their path, and were being published
+ * verbatim.
+ *
+ * The remote does not need them: it tunes by channel id, which the TV resolves
+ * against its own catalogue. Real URLs still travel over the encrypted peer
+ * link, so nothing is lost when the devices are directly connected.
+ */
+function redactCatalogItemForRelay<T extends { url?: string }>(item: T): T {
+  return { ...item, url: redactUrlForRelay(item.url) };
 }
 
 /**
@@ -261,13 +305,66 @@ export function initRemoteSync(): void {
     }
   }
 
-  // Bring the direct link up immediately rather than waiting on the broker.
-  // Gating this behind the MQTT connect handler meant a slow or unreachable
-  // broker stopped the peer link from even being attempted — the exact
-  // situation where a local route matters most.
-  initLanLink();
+  // The broker exists to introduce two devices that cannot find each other.
+  // When the television is serving the remote itself they have already met, so
+  // neither the broker nor the WebRTC handshake is started at all: no traffic
+  // leaves the house, and pairing keeps working with the internet down.
+  void initLanDirect().then(direct => {
+    if (direct) return;
 
-  connectMqtt();
+    // Bring the peer link up immediately rather than waiting on the broker.
+    // Gating this behind the MQTT connect handler meant a slow or unreachable
+    // broker stopped the peer link from even being attempted — the exact
+    // situation where a local route matters most.
+    initLanLink();
+    connectMqtt();
+  });
+}
+
+/**
+ * Sets up the direct television-served remote, on whichever side we are.
+ *
+ * On the television this opens a port and starts serving the remote UI; on a
+ * phone that fetched the page from a television it starts long-polling it. In
+ * both cases the broker becomes a fallback that a normal living-room pairing
+ * never touches.
+ */
+async function initLanDirect(): Promise<boolean> {
+  const secret = getOrGeneratePairingSecret();
+
+  if (!state.isRemoteClient) {
+    const url = startTvLanServer(secret, cmd => {
+      // A command can only arrive once a phone has presented the pairing
+      // secret, so the first one is the moment the pairing actually completed.
+      updateLanBadge('connected', 'served from this TV');
+      handleIncomingRemoteCommand(cmd);
+    });
+    if (!url) return false;
+    // Seed the topics so a remote that connects later has something to render
+    // immediately rather than waiting for the next state change.
+    broadcastTVState();
+    broadcastTVCatalog();
+    return true;
+  }
+
+  if (!(await isServedByTv())) return false;
+
+  startRemoteLanClient(secret, (topic, payload) => {
+    if (topic === 'state') updateRemoteStateView(payload);
+    else if (topic === 'catalog') handleIncomingCatalogSync(payload);
+    else if (topic === 'resume') seriesContext.importResume(payload?.points || []);
+  });
+
+  updateLanBadge('connected', 'direct to TV');
+  const statEl = document.getElementById('remote-conn-status');
+  if (statEl) statEl.textContent = 'Connected to Quant TV';
+  const statDot = document.getElementById('remote-status-dot');
+  if (statDot) {
+    statDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse';
+  }
+  sendRemoteCmd('REMOTE_JOINED', { agent: navigator.userAgent });
+  sendRemoteCmd('REQUEST_SYNC');
+  return true;
 }
 
 export function sendRemoteCmd(action: string, payload: Record<string, any> = {}): void {
@@ -278,6 +375,15 @@ export function sendRemoteCmd(action: string, payload: Record<string, any> = {})
   }
   const msgId = `${action}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const cmd = { msgId, action, payload, roomId: state.roomId, sender: 'remote', time: Date.now() };
+
+  // Straight to the television when it served this page: one LAN round trip,
+  // no broker, no peer handshake to have failed. Fire-and-forget because the
+  // remote's feedback is the state update that follows, not the POST's status.
+  if (isLanDirectActive()) {
+    void sendLanCommand(cmd);
+    if (broadcastChan) broadcastChan.postMessage(cmd);
+    return;
+  }
 
   // Direct LAN first — a keypress lands in single-digit milliseconds. send()
   // only reports true once the DataChannel is genuinely open, so falling back to
@@ -324,11 +430,18 @@ export function broadcastTVState(): void {
     favorites: state.favorites
   };
 
-  const sentDirect = lanLink?.send({ action: 'SYNC_STATE', payload: tvState }) ?? false;
+  // Served straight off this television, so the real URLs are safe to include:
+  // they never leave the local network.
+  const servedLocally = publishTvLanTopic('state', tvState);
+
+  const sentDirect = (lanLink?.send({ action: 'SYNC_STATE', payload: tvState }) ?? false) || servedLocally;
 
   if (broadcastChan) broadcastChan.postMessage({ action: 'SYNC_STATE', payload: tvState });
   if (!sentDirect && mqttClient && mqttClient.connected) {
-    mqttClient.publish(`quantum_tv/${state.roomId}/state`, JSON.stringify(tvState));
+    // channelUrl carries the account credentials in its path; the broker copy
+    // must not.
+    const relayState = { ...tvState, channelUrl: redactUrlForRelay(tvState.channelUrl) };
+    mqttClient.publish(`quantum_tv/${state.roomId}/state`, JSON.stringify(relayState));
   }
 }
 
@@ -358,7 +471,9 @@ export function broadcastTVCatalog(): void {
   // message. The MQTT path below can only carry a few hundred rows before the
   // broker's rate limits start dropping chunks, which is why the remote used to
   // show a truncated list; that path is now the fallback, not the default.
-  if (lanLink?.send({ action: 'SYNC_CATALOG', payload: { ...catalogData, favorites: state.favorites } })) {
+  const fullCatalog = { ...catalogData, favorites: state.favorites };
+  if (publishTvLanTopic('catalog', fullCatalog)) return;
+  if (lanLink?.send({ action: 'SYNC_CATALOG', payload: fullCatalog })) {
     return;
   }
 
@@ -393,9 +508,11 @@ export function broadcastTVCatalog(): void {
         }));
         const chunkPayload = {
           type: 'series',
+          // Published over the public broker, so item URLs are scrubbed of the
+          // account credentials Xtream embeds in their path.
+          items: chunkItems.map(redactCatalogItemForRelay),
           chunkIndex: i,
           totalChunks: totalSeriesChunks,
-          items: chunkItems
         };
         setTimeout(() => {
           if (mqttClient && mqttClient.connected) {
@@ -425,9 +542,11 @@ export function broadcastTVCatalog(): void {
         }));
         const chunkPayload = {
           type: 'vod',
+          // Published over the public broker, so item URLs are scrubbed of the
+          // account credentials Xtream embeds in their path.
+          items: chunkItems.map(redactCatalogItemForRelay),
           chunkIndex: i,
           totalChunks: totalMovieChunks,
-          items: chunkItems
         };
         setTimeout(() => {
           if (mqttClient && mqttClient.connected) {
@@ -455,9 +574,11 @@ export function broadcastTVCatalog(): void {
         }));
         const chunkPayload = {
           type: 'live',
+          // Published over the public broker, so item URLs are scrubbed of the
+          // account credentials Xtream embeds in their path.
+          items: chunkItems.map(redactCatalogItemForRelay),
           chunkIndex: i,
           totalChunks: totalLiveChunks,
-          items: chunkItems
         };
         setTimeout(() => {
           if (mqttClient && mqttClient.connected) {
@@ -871,6 +992,20 @@ export function setRemoteCategory(cat: string): void {
 }
 
 export function getPublicRemoteUrl(): string {
+  const secretForLink = getOrGeneratePairingSecret();
+
+  // When this television is serving the remote itself, the QR code should point
+  // at it and nowhere else: the phone then loads the UI over the LAN and talks
+  // straight back, so pairing works with the house offline and nothing —
+  // neither the catalogue nor the provider credentials — passes through a
+  // public host or broker.
+  const lanUrl = getTvLanServerUrl();
+  if (lanUrl) {
+    return `${lanUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}&k=${encodeURIComponent(
+      secretForLink
+    )}`;
+  }
+
   let baseUrl = window.location.origin;
   const isLocal =
     !baseUrl ||
@@ -884,7 +1019,13 @@ export function getPublicRemoteUrl(): string {
   if (isLocal) {
     baseUrl = 'https://quantum-iptv.vercel.app';
   }
-  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}`;
+  // The pairing secret rides in the URL the QR code encodes. Anyone who can
+  // photograph the TV screen is already in the room; anyone merely watching the
+  // public broker is not, and without this parameter their signalling is
+  // rejected.
+  return `${baseUrl.replace(/\/+$/, '')}/?remote=${encodeURIComponent(state.roomId)}&k=${encodeURIComponent(
+    secretForLink
+  )}`;
 }
 
 export function openRemotePairingModal(): void {

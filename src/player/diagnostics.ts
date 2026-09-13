@@ -1,3 +1,5 @@
+import { isUnplayableUrl, describeUnplayable } from './container-support';
+
 export interface RungRecord {
   /** Stable handle, so an async probe can find its rung after the attempt ends. */
   id: number;
@@ -12,6 +14,14 @@ export interface RungRecord {
   /** HTTP status discovered by probing the URL after the failure. */
   httpStatus?: number;
   httpNote?: string;
+  /**
+   * Whether the probe actually got media back.
+   *
+   * Separate from the status because panels answer `200 OK` with an empty
+   * `text/html` body when asked for a container they do not hold, and treating
+   * that as a served file leads the verdict badly astray.
+   */
+  servedMedia?: boolean;
 }
 
 export interface AttemptDiagnostic {
@@ -93,6 +103,16 @@ export class QuantumPlaybackDiagnostics {
     const statuses = attempt.rungs.map(r => r.httpStatus).filter((s): s is number => typeof s === 'number');
     const has = (code: number) => statuses.includes(code);
 
+    // Decided before anything else: a container the player cannot demux explains
+    // the failure completely, and no HTTP status can add to it. This is by far
+    // the most common reason an Xtream series will not play -- providers publish
+    // Matroska freely and no browser or WebView has ever supported it -- and the
+    // generic "could not decode" verdict below used to shadow it, because the
+    // speculative alternate-container rungs came back 200.
+    if (isUnplayableUrl(attempt.contentUrl)) {
+      return describeUnplayable(attempt.contentUrl);
+    }
+
     if (has(401) || has(403)) {
       return 'The provider rejected the request (HTTP 401/403). The username, password, or an active-connection limit is the likely cause — check whether another device is already streaming on this account.';
     }
@@ -101,11 +121,19 @@ export class QuantumPlaybackDiagnostics {
     // problem. A 404 on a speculative alternate extension is expected and must
     // not outrank that.
     const codesEarly = attempt.rungs.map(r => r.mediaErrorCode).filter((c): c is number => typeof c === 'number');
-    if (statuses.some(s => s >= 200 && s < 300) && codesEarly.includes(4)) {
+    // "Fetched successfully" has to mean media actually came back. A panel that
+    // answers 200 with an empty text/html body for a container it does not hold
+    // would otherwise look like a provider that served the file.
+    const servedRealMedia = attempt.rungs.some(r => r.servedMedia === true);
+    if (servedRealMedia && codesEarly.includes(4)) {
       const okExt = (attempt.contentUrl.match(/\.([A-Za-z0-9]+)(?:\?|$)/) || [])[1];
       return `The provider served the file${okExt ? ` as .${okExt}` : ''} and every playable container was tried, but this device could not decode any of them. The container or codec is unsupported here — the stream may still work in a native player such as VLC.`;
     }
 
+    const noRungServedMedia = attempt.rungs.length > 0 && attempt.rungs.every(r => r.servedMedia === false);
+    if (noRungServedMedia && statuses.every(s => s === 200)) {
+      return 'The provider accepted every request but returned an empty page instead of video. That is how an Xtream panel answers when the episode exists in the listing but no playable file is published for it on this account.';
+    }
     if (statuses.length > 0 && statuses.every(s => s === 404)) {
       return 'The provider returned HTTP 404 for every container tried (.mp4, .m4v, .mov). The episode id exists in the listing but no playable file is published for it, which usually means the title is not actually available on this account.';
     }
@@ -122,7 +150,7 @@ export class QuantumPlaybackDiagnostics {
     // outranks a failed probe on another rung: a direct request commonly fails
     // CORS in a browser while the proxied one succeeds, and reporting that as
     // "blocked" would hide the real cause.
-    const someRungFetchedOk = statuses.some(s => s >= 200 && s < 300);
+    const someRungFetchedOk = attempt.rungs.some(r => r.servedMedia === true);
     if (has(0) && !someRungFetchedOk) {
       return 'The request never completed — blocked, refused, or timed out. On a browser this is usually mixed content or CORS; on the TV it points at the network or the provider being unreachable.';
     }

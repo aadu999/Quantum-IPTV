@@ -8,6 +8,7 @@ import { xtreamConnector, getXtreamCredentials } from '../services/xtream';
 import { QuantumStreamEngine } from '../player/engine';
 import { broadcastTVState } from '../services/remote';
 import { seriesContext, EpisodeRef } from '../state/series-context';
+import { unplayableBadge, describeUnplayable } from '../player/container-support';
 import { escapeHtml, escapeAttr } from './channels';
 
 let engineInstance: QuantumStreamEngine | null = null;
@@ -254,17 +255,30 @@ export function selectSeriesSeason(seasonNum: string): void {
       return `
       <div data-episode-index="${idx}" class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-xl overflow-hidden flex flex-col transition shadow-md group">
         <div class="relative aspect-video bg-slate-900 overflow-hidden">
-          ${
-            ep.thumb
-              ? `<img src="${escapeAttr(ep.thumb)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.classList.add('hidden')" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
-              : ''
-          }
-          <!-- Sits behind the image, so a missing or broken still degrades to a
-               labelled placeholder instead of an empty box. -->
-          <div class="absolute inset-0 -z-10 flex items-center justify-center text-slate-700">
+          <!-- Painted first, so a missing or broken still degrades to a labelled
+               placeholder instead of an empty box. It used to be pushed behind
+               the image with -z-10, but neither this box nor the card around it
+               establishes a stacking context, so the negative index put it
+               behind the card's own opaque background and it never showed. DOM
+               order does the job without the trick: the image is positioned
+               too, so it simply paints over this. -->
+          <div class="absolute inset-0 flex items-center justify-center text-slate-700">
             <i class="fa-solid fa-clapperboard text-2xl"></i>
           </div>
+          ${
+            ep.thumb
+              ? `<img src="${escapeAttr(ep.thumb)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.classList.add('hidden')" class="relative w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
+              : ''
+          }
           <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold">${epNumStr}</span>
+          ${
+            // Said before the viewer commits to it. A Matroska episode cannot
+            // play in the built-in player, and letting it be tapped only to fail
+            // twenty seconds later is the worst of both worlds.
+            unplayableBadge(ep.url)
+              ? `<span class="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-amber-950/90 text-amber-300 border border-amber-700/60 text-[9px] font-mono font-bold" title="${escapeAttr(describeUnplayable(ep.url))}">${escapeAttr(unplayableBadge(ep.url))}</span>`
+              : ''
+          }
           ${
             ep.durationSec
               ? `<span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-slate-200 text-[9px] font-mono">${formatEpisodeDuration(ep.durationSec)}</span>`
@@ -338,9 +352,13 @@ export function playEpisodeAt(index: number): void {
 }
 
 export function playEpisodeRef(ep: EpisodeRef): void {
+  // Declared before the engine loads: the failover ladder asks what is playing
+  // to decide how to treat the URL, and the quick strip follows this too.
+  seriesContext.beginEpisodePlayback(ep);
+
   const currentChName = document.getElementById('current-ch-name');
   const currentChEpg = document.getElementById('current-ch-epg');
-  const ctx = seriesContext.current;
+  const ctx = seriesContext.playbackContext;
   if (currentChName) currentChName.textContent = ep.title;
   if (currentChEpg) {
     currentChEpg.textContent = ctx
@@ -379,8 +397,10 @@ export function closeSeriesExplorer(): void {
 
 export function playEpisodeStream(streamUrl: string, episodeTitle = 'Episode'): void {
   closeSeriesExplorer();
-  // Played outside a season listing, so there is no episode rail to show.
+  // Played outside a season listing, so there is no episode rail to show and
+  // no season to roll on into.
   seriesContext.clearActive();
+  seriesContext.endEpisodePlayback();
   const currentChName = document.getElementById('current-ch-name');
   const currentChEpg = document.getElementById('current-ch-epg');
   if (currentChName) currentChName.textContent = episodeTitle;
@@ -485,6 +505,9 @@ export function startMoviePlayback(channel: Channel): void {
   if (currentChEpg) currentChEpg.textContent = channel.group || 'VOD Movie';
 
   userProfile.recordWatchEvent(channel, 5);
+  // A film is not an episode: it keeps its own resume point and must not roll
+  // into a season the viewer was merely browsing.
+  seriesContext.endEpisodePlayback();
   engineInstance?.load(channel.url);
   (window as any).renderChannelList?.();
   broadcastTVState();

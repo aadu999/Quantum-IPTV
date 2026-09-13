@@ -21,6 +21,12 @@ export type LanLinkRole = 'tv' | 'remote';
 export type LanLinkStatus = 'idle' | 'signalling' | 'connecting' | 'connected' | 'failed';
 
 export interface LanLinkHandlers {
+  /**
+   * Shared secret both sides must present. Signalling travels over a public
+   * broker, so possession of the room id proves nothing; only a device that
+   * scanned the pairing code knows this.
+   */
+  pairingSecret: string;
   /** Called with each fully reassembled application message from the peer. */
   onMessage: (data: any) => void;
   onStatusChange?: (status: LanLinkStatus, detail?: string) => void;
@@ -112,7 +118,26 @@ export class QuantumLanLink {
 
   /** Tells any peer already listening that this device is here. */
   announce(): void {
-    this.handlers.publishSignal({ kind: 'hello', from: this.sessionId, role: this.role });
+    this.handlers.publishSignal({
+      kind: 'hello',
+      from: this.sessionId,
+      role: this.role,
+      auth: this.handlers.pairingSecret
+    });
+  }
+
+  /**
+   * Rejects signalling from a peer that cannot prove it was paired.
+   *
+   * Without this the TV accepted any offer that named its room, and room ids are
+   * visible to anyone watching the broker. An unpaired peer could open a data
+   * channel, receive the session (Xtream host, username and password) and issue
+   * commands.
+   */
+  private isAuthorised(payload: any): boolean {
+    const expected = this.handlers.pairingSecret;
+    if (!expected) return true;   // pairing not configured; nothing to enforce
+    return typeof payload?.auth === 'string' && payload.auth === expected;
   }
 
   private buildPeerConnection(): RTCPeerConnection {
@@ -123,6 +148,7 @@ export class QuantumLanLink {
         this.handlers.publishSignal({
           kind: 'ice',
           from: this.sessionId,
+          auth: this.handlers.pairingSecret,
           role: this.role,
           candidate: event.candidate.toJSON()
         });
@@ -183,6 +209,7 @@ export class QuantumLanLink {
     this.handlers.publishSignal({
       kind: 'offer',
       from: this.sessionId,
+      auth: this.handlers.pairingSecret,
       role: this.role,
       sdp: pc.localDescription?.sdp
     });
@@ -194,6 +221,11 @@ export class QuantumLanLink {
     if (!payload || !payload.kind || !this.supported()) return;
     // Ignore our own echoes — both transports loop messages back to the sender.
     if (payload.from && payload.from === this.sessionId) return;
+
+    if (!this.isAuthorised(payload)) {
+      console.warn('[QuantumLanLink] Rejected signalling from an unpaired peer.');
+      return;
+    }
 
     try {
       if (payload.kind === 'hello') {
@@ -236,6 +268,7 @@ export class QuantumLanLink {
     this.handlers.publishSignal({
       kind: 'answer',
       from: this.sessionId,
+      auth: this.handlers.pairingSecret,
       to: payload.from,
       role: this.role,
       sdp: pc.localDescription?.sdp
