@@ -53,6 +53,11 @@ export function playChannel(index: number, options: { directPlay?: boolean } = {
   }
 
   (window as any).closeModals?.();
+
+  // A live channel or a film is not an episode, so nothing here should autoplay
+  // the next one or file its position under an episode's id.
+  seriesContext.endEpisodePlayback();
+
   const currentChName = document.getElementById('current-ch-name');
   const currentChLogo = document.getElementById('current-ch-logo') as HTMLImageElement | null;
   const currentChEpg = document.getElementById('current-ch-epg');
@@ -390,7 +395,7 @@ export function renderQuickChannelStrip(): void {
   // back to whatever focusFirstInteractiveElement() picked.
   const focusedKey = strip.querySelector('.tv-focused')?.getAttribute('data-focus-key') || null;
 
-  const html = seriesContext.current ? buildEpisodeStrip() : buildChannelStrip();
+  const html = seriesContext.playbackContext ? buildEpisodeStrip() : buildChannelStrip();
   if (html === null) {
     strip.innerHTML = '';
     return;
@@ -418,7 +423,7 @@ export function renderQuickChannelStrip(): void {
  * instead of jumping out of the programme the viewer is watching.
  */
 function buildEpisodeStrip(): string | null {
-  const ctx = seriesContext.current;
+  const ctx = seriesContext.playbackContext;
   if (!ctx || ctx.episodes.length === 0) return null;
 
   return ctx.episodes

@@ -338,9 +338,13 @@ export function playEpisodeAt(index: number): void {
 }
 
 export function playEpisodeRef(ep: EpisodeRef): void {
+  // Declared before the engine loads: the failover ladder asks what is playing
+  // to decide how to treat the URL, and the quick strip follows this too.
+  seriesContext.beginEpisodePlayback(ep);
+
   const currentChName = document.getElementById('current-ch-name');
   const currentChEpg = document.getElementById('current-ch-epg');
-  const ctx = seriesContext.current;
+  const ctx = seriesContext.playbackContext;
   if (currentChName) currentChName.textContent = ep.title;
   if (currentChEpg) {
     currentChEpg.textContent = ctx
@@ -379,8 +383,10 @@ export function closeSeriesExplorer(): void {
 
 export function playEpisodeStream(streamUrl: string, episodeTitle = 'Episode'): void {
   closeSeriesExplorer();
-  // Played outside a season listing, so there is no episode rail to show.
+  // Played outside a season listing, so there is no episode rail to show and
+  // no season to roll on into.
   seriesContext.clearActive();
+  seriesContext.endEpisodePlayback();
   const currentChName = document.getElementById('current-ch-name');
   const currentChEpg = document.getElementById('current-ch-epg');
   if (currentChName) currentChName.textContent = episodeTitle;
@@ -485,6 +491,9 @@ export function startMoviePlayback(channel: Channel): void {
   if (currentChEpg) currentChEpg.textContent = channel.group || 'VOD Movie';
 
   userProfile.recordWatchEvent(channel, 5);
+  // A film is not an episode: it keeps its own resume point and must not roll
+  // into a season the viewer was merely browsing.
+  seriesContext.endEpisodePlayback();
   engineInstance?.load(channel.url);
   (window as any).renderChannelList?.();
   broadcastTVState();

@@ -25,6 +25,24 @@ export interface SeriesContext {
   index: number;
 }
 
+/**
+ * What is actually on screen, as opposed to what the viewer is browsing.
+ *
+ * These are separate on purpose. Opening the series explorer sets the browse
+ * context, and that must not make the player believe an episode is playing:
+ * doing so had a movie record its position under the episode's id, autoplayed
+ * an episode when a film ended, and switched the quick strip to a season the
+ * viewer was only looking at. The episode list is snapshotted here so
+ * "what plays next" survives the viewer browsing to another season mid-episode.
+ */
+export interface PlaybackContext {
+  seriesId: string;
+  seriesName: string;
+  season: string;
+  episodes: EpisodeRef[];
+  index: number;
+}
+
 export interface ResumePoint {
   contentId: string;
   title: string;
@@ -50,6 +68,7 @@ export interface ResumePoint {
  */
 export class QuantumSeriesContext {
   private active: SeriesContext | null = null;
+  private playback: PlaybackContext | null = null;
   private resume = new Map<string, ResumePoint>();
   private persistTimer: any = null;
   private listeners = new Set<(ctx: SeriesContext | null) => void>();
@@ -66,9 +85,13 @@ export class QuantumSeriesContext {
 
   setActive(ctx: SeriesContext | null): void {
     this.active = ctx;
+    this.notify();
+  }
+
+  private notify(): void {
     for (const fn of this.listeners) {
       try {
-        fn(ctx);
+        fn(this.active);
       } catch {
         /* a listener must not break playback */
       }
@@ -84,7 +107,7 @@ export class QuantumSeriesContext {
     return () => this.listeners.delete(fn);
   }
 
-  /** Moves the pointer within the active season. */
+  /** Moves the browse pointer within the season being looked at. */
   setIndex(index: number): EpisodeRef | null {
     if (!this.active) return null;
     if (index < 0 || index >= this.active.episodes.length) return null;
@@ -93,9 +116,44 @@ export class QuantumSeriesContext {
     return this.active.episodes[index];
   }
 
+  // --- what is playing ----------------------------------------------------
+
+  /**
+   * Declares that an episode is now on screen. Must be called before the
+   * engine loads it, since the failover ladder asks what is playing to decide
+   * how to treat the URL.
+   */
+  beginEpisodePlayback(ep: EpisodeRef): void {
+    const ctx = this.active;
+    // Snapshot the season, so browsing elsewhere afterwards cannot change what
+    // plays next.
+    const episodes = ctx && ctx.episodes.some(e => e.id === ep.id) ? [...ctx.episodes] : [ep];
+    const index = Math.max(0, episodes.findIndex(e => e.id === ep.id));
+    this.playback = {
+      seriesId: ctx?.seriesId || '',
+      seriesName: ctx?.seriesName || '',
+      season: ep.season,
+      episodes,
+      index
+    };
+    this.notify();
+  }
+
+  /** Called when anything that is not an episode starts playing. */
+  endEpisodePlayback(): void {
+    if (!this.playback) return;
+    this.playback = null;
+    this.notify();
+  }
+
+  get playbackContext(): PlaybackContext | null {
+    return this.playback;
+  }
+
+  /** The episode on screen, or null when a film or live channel is playing. */
   get currentEpisode(): EpisodeRef | null {
-    if (!this.active) return null;
-    return this.active.episodes[this.active.index] || null;
+    if (!this.playback) return null;
+    return this.playback.episodes[this.playback.index] || null;
   }
 
   /**
@@ -104,13 +162,23 @@ export class QuantumSeriesContext {
    * viewer with a season boundary.
    */
   get nextEpisode(): EpisodeRef | null {
-    if (!this.active) return null;
-    return this.active.episodes[this.active.index + 1] || null;
+    if (!this.playback) return null;
+    return this.playback.episodes[this.playback.index + 1] || null;
   }
 
   get previousEpisode(): EpisodeRef | null {
-    if (!this.active) return null;
-    return this.active.episodes[this.active.index - 1] || null;
+    if (!this.playback) return null;
+    return this.playback.episodes[this.playback.index - 1] || null;
+  }
+
+  /** Steps the playback pointer on by one. @returns the episode now current. */
+  advancePlayback(): EpisodeRef | null {
+    if (!this.playback) return null;
+    const next = this.playback.episodes[this.playback.index + 1];
+    if (!next) return null;
+    this.playback.index++;
+    this.notify();
+    return next;
   }
 
   // --- resume points ------------------------------------------------------
