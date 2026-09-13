@@ -68,6 +68,14 @@ export class QuantumStreamWatchdog {
 
     const isHealthy = diagnosis.type === 'PROGRESSING' || diagnosis.type === 'PAUSED_OR_SEEKING';
 
+    // Advancing, but degraded enough to act on pre-emptively. These come out of
+    // the classifier's *healthy* branch -- the picture is moving -- so they must
+    // not be counted as stalls: doing so charged a stall to the source every
+    // 500ms while it played perfectly well, and the ranking then demoted the
+    // healthiest endpoint on offer. The down-switch below still runs.
+    const isDegradedButPlaying =
+      diagnosis.type === 'BANDWIDTH_DEFICIT' || diagnosis.type === 'DECODER_OVERLOAD';
+
     if (isHealthy) {
       if (this.wasStalled) {
         // Recovered without further intervention — release the escalation
@@ -79,28 +87,30 @@ export class QuantumStreamWatchdog {
       return;
     }
 
-    this.wasStalled = true;
+    if (!isDegradedButPlaying) {
+      this.wasStalled = true;
 
-    sessionManager.recordStall(TICK_INTERVAL_MS);
+      sessionManager.recordStall(TICK_INTERVAL_MS);
 
-    // Attribute the stall to the source that produced it. This path existed but
-    // was never called, so per-endpoint stall history stayed permanently empty
-    // and could never influence source ranking.
-    const currentUrl = this.options.getCurrentUrl?.();
-    if (currentUrl) {
-      sourceHealthTracker.recordStall(currentUrl, TICK_INTERVAL_MS);
-    }
+      // Attribute the stall to the source that produced it. This path existed
+      // but was never called, so per-endpoint stall history stayed permanently
+      // empty and could never influence source ranking.
+      const currentUrl = this.options.getCurrentUrl?.();
+      if (currentUrl) {
+        sourceHealthTracker.recordStall(currentUrl, TICK_INTERVAL_MS);
+      }
 
-    eventBus.emit('STALL_DETECTED', {
-      type: diagnosis.type,
-      severity: diagnosis.severity,
-      stallTicks: diagnosis.stallTicks,
-      stallDurationSec: diagnosis.stallDurationSec,
-      bufferedAhead: snapshot.bufferedAhead
-    });
+      eventBus.emit('STALL_DETECTED', {
+        type: diagnosis.type,
+        severity: diagnosis.severity,
+        stallTicks: diagnosis.stallTicks,
+        stallDurationSec: diagnosis.stallDurationSec,
+        bufferedAhead: snapshot.bufferedAhead
+      });
 
-    if (diagnosis.type === 'NETWORK_STARVATION' && this.options.onStarvation) {
-      this.options.onStarvation(diagnosis.stallDurationSec);
+      if (diagnosis.type === 'NETWORK_STARVATION' && this.options.onStarvation) {
+        this.options.onStarvation(diagnosis.stallDurationSec);
+      }
     }
 
     // 3. PLAN & EXECUTE: the only stage permitted to touch playback.

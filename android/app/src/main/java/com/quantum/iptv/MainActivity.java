@@ -29,9 +29,12 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -44,6 +47,16 @@ public class MainActivity extends BridgeActivity {
     private long lastBackPressTime = 0;
     private Toast exitToast;
     private QuantumLanRemoteServer lanRemoteServer;
+
+    /**
+     * Keycodes the web layer has said it will handle itself.
+     *
+     * Replaced wholesale rather than mutated: it is written from the JavaScript
+     * bridge thread and read on the UI thread during key dispatch, and swapping
+     * an immutable snapshot needs no lock and no concurrent collection (whose
+     * newKeySet() is API 24 anyway, above this app's minimum of 23).
+     */
+    private volatile Set<Integer> claimedKeyCodes = Collections.emptySet();
 
     /**
      * Brings up the on-device remote server and hands commands it receives to
@@ -219,6 +232,29 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void publishLanTopic(String topic, String json) {
             if (lanRemoteServer != null) lanRemoteServer.publish(topic, json);
+        }
+
+        /**
+         * Records which remote keycodes the web layer will consume, as a
+         * comma-separated list. dispatchKeyEvent() has to decide synchronously
+         * whether to swallow a key, and evaluateJavascript() cannot answer in
+         * time, so the web layer publishes the set up front instead.
+         */
+        @JavascriptInterface
+        public void setClaimedTvKeyCodes(String csv) {
+            Set<Integer> next = new HashSet<>();
+            if (csv != null) {
+                for (String part : csv.split(",")) {
+                    String trimmed = part.trim();
+                    if (trimmed.isEmpty()) continue;
+                    try {
+                        next.add(Integer.parseInt(trimmed));
+                    } catch (NumberFormatException ignored) {
+                        // A malformed entry must not drop the rest of the map.
+                    }
+                }
+            }
+            claimedKeyCodes = Collections.unmodifiableSet(next);
         }
 
         @JavascriptInterface
@@ -517,12 +553,30 @@ public class MainActivity extends BridgeActivity {
             // Offer every remaining keycode to the web layer before falling through.
             // OEM remotes emit vendor-specific codes for P+/P-, GUIDE and colour
             // buttons that are not in the AOSP constant set, so the switch above
-            // can never be exhaustive. onNativeTvKey() consults a runtime-editable
-            // map and reports back whether it consumed the key; anything it does
-            // not claim still reaches the WebView as a normal DOM key event.
+            // can never be exhaustive.
+            //
+            // Whether the web layer consumes a key is decided from the set it
+            // published via setClaimedTvKeyCodes(), not from what
+            // onNativeTvKey() returns: evaluateJavascript() is asynchronous, so
+            // that return value arrived long after this method had to answer and
+            // was discarded. A claimed key therefore reached the WebView as a DOM
+            // event as well and was acted on twice -- one press of P+ skipping
+            // two channels. Unclaimed keys still fall through untouched.
+            if (claimedKeyCodes.contains(keyCode)) {
+                if (action == KeyEvent.ACTION_DOWN && !event.isCanceled()) {
+                    webView.evaluateJavascript(
+                        "window.onNativeTvKey && window.onNativeTvKey(" + keyCode + ");", null);
+                }
+                // The matching ACTION_UP is swallowed too, so the page never sees
+                // a keyup without its keydown.
+                return true;
+            }
+
             if (action == KeyEvent.ACTION_DOWN && !event.isCanceled()) {
+                // Unclaimed: let the web layer see it (it may learn the code for
+                // a remote we do not know yet), then pass it on as normal.
                 webView.evaluateJavascript(
-                    "window.onNativeTvKey ? window.onNativeTvKey(" + keyCode + ") : false;", null);
+                    "window.onNativeTvKey && window.onNativeTvKey(" + keyCode + ");", null);
             }
         }
         return super.dispatchKeyEvent(event);

@@ -538,9 +538,9 @@ export function setupEventListeners(): void {
     });
     video.addEventListener('error', () => {
       // Hand this to the failover ladder rather than ending the attempt. Calling
-      // onStreamFailed() here skipped every remaining rung. The generation is
-      // passed so a stale error cannot consume a rung of a newer attempt.
-      engine.handleVideoElementError(engine.currentLoadGeneration);
+      // onStreamFailed() here skipped every remaining rung. The engine decides
+      // whether the error belongs to the attempt now running.
+      engine.handleVideoElementError();
     });
 
     // Series continuity: resume where the viewer left off, and roll into the

@@ -154,7 +154,14 @@ export class StallClassifier {
     // Requiring readyState >= 3 avoids nudging a decoder that simply has not
     // been handed enough data yet.
     if (snapshot.bufferedAhead >= 0.6 && snapshot.readyState >= 3) {
-      if (this.stallTicks >= 2) {
+      // "Frozen" has to mean frozen. The only test used to be how many ticks
+      // had elapsed, so anything below 65% of realtime became a DECODER_FREEZE
+      // on the second tick -- which both nudged the decoder of a stream that
+      // was merely slow, and made the stutter escalation below dead code, since
+      // the counter could never reach two.
+      const effectivelyFrozen = snapshot.progressRatio < MICRO_STUTTER_RATIO;
+
+      if (effectivelyFrozen && this.stallTicks >= 2) {
         eventBus.emit('STALL_CLASSIFIED', {
           type: 'DECODER_FREEZE',
           bufferedAhead: snapshot.bufferedAhead,
@@ -171,20 +178,18 @@ export class StallClassifier {
         };
       }
 
-      // One slow tick with a full buffer is a stutter, not a freeze. Reporting
+      // Slow but moving, with a full buffer: a stutter, not a freeze. Reporting
       // it lets the HUD stay honest without provoking a seek the viewer would
-      // see as a jump.
+      // see as a jump. Four such ticks in a row is a stream this device cannot
+      // sustain, so drop a rendition rather than keep limping.
       this.consecutiveStutterTicks++;
       return {
         type: 'MICRO_STUTTER',
-        severity: 'LOW',
+        severity: this.consecutiveStutterTicks >= 4 ? 'MEDIUM' : 'LOW',
         stallTicks: this.stallTicks,
         starvationTicks: this.starvationTicks,
         stallDurationSec,
-        recommendedAction:
-          this.consecutiveStutterTicks >= 4 || snapshot.progressRatio < MICRO_STUTTER_RATIO
-            ? 'DOWN_SWITCH'
-            : 'NONE',
+        recommendedAction: this.consecutiveStutterTicks >= 4 ? 'DOWN_SWITCH' : 'NONE',
         reason: `Playback running at ${Math.round(snapshot.progressRatio * 100)}% of realtime`
       };
     }

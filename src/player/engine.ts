@@ -369,12 +369,21 @@ export class QuantumStreamEngine {
    * on-demand content that meant an episode never got its proxied or
    * alternate-container retry, and simply refused to play.
    */
-  handleVideoElementError(generation?: number): void {
-    if (!this.currentSourceUrl) return;
-    // Every other error path is generation-guarded; without the same check a
-    // late error from a source the viewer already left burns a rung of the
-    // attempt that replaced it.
-    if (typeof generation === 'number' && generation !== this.loadGeneration) return;
+  handleVideoElementError(): void {
+    if (!this.currentSourceUrl || !this.video) return;
+
+    // The element has to actually be in an error state. This used to take a
+    // generation argument and compare it against this.loadGeneration, but the
+    // caller is a permanent listener that could only ever read the live value,
+    // so it compared a number with itself and filtered nothing -- and load()
+    // attaches synchronously, so there is no window in which a generation could
+    // have told a stale error from a current one anyway. What can be checked is
+    // whether HTMLMediaElement.error is set, which the browser does before it
+    // fires the event; a call without it is spurious and must not cost a rung.
+    if (!this.video.error) return;
+
+    // Repeat errors within one attempt are absorbed by advanceLadder(), which
+    // moves on once per generation.
     this.advanceLadder('video_element_error');
   }
 

@@ -29,6 +29,11 @@ export function initTvNavigation(): void {
   if (tvNavigationInitialized) return;
   tvNavigationInitialized = true;
 
+  // Not done from registerGlobalTvHandlers(): that runs while this module is
+  // still evaluating, and reading ANDROID_KEYCODE_MAP before its declaration is
+  // a temporal dead zone error that would abort startup inside the app.
+  publishClaimedTvKeyCodes();
+
   // Inject TV focus styles into head if not already present
   if (!document.getElementById('tv-navigation-styles')) {
     const style = document.createElement('style');
@@ -938,6 +943,48 @@ const ANDROID_KEYCODE_MAP: Record<number, string> = {
   165: 'Info'             // KEYCODE_INFO
 };
 
+/** Actions onNativeTvKey() genuinely consumes; anything else must pass through. */
+const CONSUMED_TV_ACTIONS = new Set([
+  'ChannelUp',
+  'ChannelDown',
+  'ColorRed',
+  'ColorGreen',
+  'ColorYellow',
+  'ColorBlue',
+  'Guide',
+  'Info'
+]);
+
+/**
+ * Tells the native side which keycodes the web layer will consume.
+ *
+ * dispatchKeyEvent() has to decide synchronously whether to swallow a key, but
+ * evaluateJavascript() is asynchronous and its result was simply discarded --
+ * so a key the web layer handled was *also* delivered to the WebView as a DOM
+ * event and acted on twice, which is why one press of P+ could skip two
+ * channels. Publishing the set up front lets the native side answer that
+ * question without waiting on JavaScript.
+ */
+export function publishClaimedTvKeyCodes(): void {
+  const native = (window as any).AndroidTvNative;
+  if (!native || typeof native.setClaimedTvKeyCodes !== 'function') return;
+
+  const claimed = new Set<string>();
+  for (const [code, action] of Object.entries(ANDROID_KEYCODE_MAP)) {
+    if (CONSUMED_TV_ACTIONS.has(action)) claimed.add(code);
+  }
+  for (const [code, action] of Object.entries(loadKeymapOverrides())) {
+    if (CONSUMED_TV_ACTIONS.has(String(action))) claimed.add(String(code));
+    else claimed.delete(String(code));
+  }
+
+  try {
+    native.setClaimedTvKeyCodes([...claimed].join(','));
+  } catch (e) {
+    console.warn('[QuantumTV] Could not publish the remote key map to the app:', e);
+  }
+}
+
 /** Last unrecognised keycode, surfaced so an unusual remote can be mapped. */
 let lastUnmappedAndroidKeyCode: number | null = null;
 
@@ -1003,6 +1050,9 @@ export function learnTvKey(action: string): number | null {
   } catch {
     /* storage unavailable */
   }
+  // The native side decides synchronously what to swallow, so it has to be told
+  // about a newly taught key straight away.
+  publishClaimedTvKeyCodes();
   return lastUnmappedAndroidKeyCode;
 }
 

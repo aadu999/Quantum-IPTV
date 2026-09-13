@@ -254,16 +254,21 @@ export function selectSeriesSeason(seasonNum: string): void {
       return `
       <div data-episode-index="${idx}" class="bg-slate-950/80 border border-slate-800/90 hover:border-brand-500/60 rounded-xl overflow-hidden flex flex-col transition shadow-md group">
         <div class="relative aspect-video bg-slate-900 overflow-hidden">
-          ${
-            ep.thumb
-              ? `<img src="${escapeAttr(ep.thumb)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.classList.add('hidden')" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
-              : ''
-          }
-          <!-- Sits behind the image, so a missing or broken still degrades to a
-               labelled placeholder instead of an empty box. -->
-          <div class="absolute inset-0 -z-10 flex items-center justify-center text-slate-700">
+          <!-- Painted first, so a missing or broken still degrades to a labelled
+               placeholder instead of an empty box. It used to be pushed behind
+               the image with -z-10, but neither this box nor the card around it
+               establishes a stacking context, so the negative index put it
+               behind the card's own opaque background and it never showed. DOM
+               order does the job without the trick: the image is positioned
+               too, so it simply paints over this. -->
+          <div class="absolute inset-0 flex items-center justify-center text-slate-700">
             <i class="fa-solid fa-clapperboard text-2xl"></i>
           </div>
+          ${
+            ep.thumb
+              ? `<img src="${escapeAttr(ep.thumb)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.classList.add('hidden')" class="relative w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
+              : ''
+          }
           <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-brand-300 border border-brand-800/60 text-[9px] font-mono font-bold">${epNumStr}</span>
           ${
             ep.durationSec
