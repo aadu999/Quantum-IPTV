@@ -4,9 +4,15 @@
 
 import { state, FALLBACK_LOGO } from '../state/store';
 import { toggleMute } from './controls';
+import { QuantumStreamEngine } from '../player/engine';
 
 let channelNumberBuffer = '';
 let channelNumberTimeout: any = null;
+
+let engineInstance: QuantumStreamEngine | null = null;
+export function setTvNavEngineInstance(engine: QuantumStreamEngine): void {
+  engineInstance = engine;
+}
 
 export function isAndroidTv(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -265,12 +271,19 @@ function isLiveEntry(ch: { type?: string; seriesId?: string; vodId?: string } | 
  * live channel the walk skips over VOD and series rows: zapping with the channel
  * keys should never drop the viewer into a movie, which is what a naive
  * index + 1 does on a mixed Xtream catalogue.
+ *
+ * That guard reads state.currentChannelIndex, which keeps pointing at whatever
+ * live channel was last tuned even while an episode plays on top of it -- so
+ * without the on-demand check below, P+/P- while watching a series silently
+ * fell back to stepping through live channels only, appearing to do nothing
+ * useful for the content actually on screen.
  */
 function stepChannel(step: 1 | -1): void {
   const list = state.filteredChannels;
   if (list.length === 0) return;
 
-  const stayLive = isLiveEntry(list[state.currentChannelIndex]);
+  const onDemandActive = engineInstance?.isOnDemandActive() ?? false;
+  const stayLive = !onDemandActive && isLiveEntry(list[state.currentChannelIndex]);
   let index = state.currentChannelIndex;
 
   for (let hops = 0; hops < list.length; hops++) {

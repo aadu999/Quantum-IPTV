@@ -309,6 +309,17 @@ export class QuantumStreamEngine {
   }
 
   /**
+   * Whether the currently loaded source is an episode or movie rather than a
+   * live channel. currentChannelIndex keeps pointing at the last live channel
+   * tuned even while on-demand content plays, so callers that need to know
+   * what is actually on screen right now (the P+/P- zap guard, HUD labels)
+   * should ask this instead of reading the channel list.
+   */
+  isOnDemandActive(): boolean {
+    return this.currentIsOnDemand;
+  }
+
+  /**
    * Entry point for a user-initiated tune. Resets all failover state and builds
    * a fresh ladder for the channel.
    */
