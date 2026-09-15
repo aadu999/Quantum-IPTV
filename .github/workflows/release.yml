@@ -1,0 +1,102 @@
+name: Release
+
+# Cutting a release is a deliberate act, so this only ever runs on request.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create, e.g. v2.2.0'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Everything below runs before anything is published. A release that
+      # names a version must contain that version's build -- the v2.2.0
+      # artifact once shipped four commits stale and nothing noticed.
+      - name: Verify the tag, the versions and the APK agree
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$TAG' is not a vMAJOR.MINOR.PATCH tag."
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG already exists."
+            exit 1
+          fi
+
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$PKG" != "$VERSION" ]; then
+            echo "::error::package.json says $PKG, tag says $VERSION."
+            exit 1
+          fi
+
+          GRADLE=$(grep -oP 'versionName\s+"\K[^"]+' android/app/build.gradle)
+          if [ "$GRADLE" != "$VERSION" ]; then
+            echo "::error::build.gradle versionName is $GRADLE, tag says $VERSION."
+            exit 1
+          fi
+
+          APK="releases/Quantum-IPTV-$TAG.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::$APK is missing. Build it and commit it before releasing."
+            exit 1
+          fi
+
+          # The check that would have caught the stale artifact: the shipped
+          # binary has to contain the code this version claims to add.
+          mkdir -p /tmp/apkverify
+          unzip -o -q "$APK" 'classes*.dex' -d /tmp/apkverify
+          MISSING=0
+          for SYMBOL in NativePlayerActivity QuantumLanRemoteServer androidx/media3; do
+            if ! grep -qa "$SYMBOL" /tmp/apkverify/classes*.dex; then
+              echo "::error::$APK does not contain $SYMBOL -- it looks stale."
+              MISSING=1
+            fi
+          done
+          [ "$MISSING" -eq 0 ] || exit 1
+
+          SIZE=$(stat -c%s "$APK")
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          echo "Verified $APK ($((SIZE / 1024 / 1024)) MB) against $TAG."
+
+      - name: Create the tag and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          NOTES="docs/release-notes/$TAG.md"
+          FLAGS=(--target "$GITHUB_SHA" --title "Quantum IPTV $TAG")
+
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            FLAGS+=(--prerelease)
+          fi
+
+          if [ -f "$NOTES" ]; then
+            FLAGS+=(--notes-file "$NOTES")
+          else
+            FLAGS+=(--generate-notes)
+          fi
+
+          gh release create "$TAG" "${FLAGS[@]}" "$APK_PATH"
+          echo "Published: $(gh release view "$TAG" --json url --jq .url)"
