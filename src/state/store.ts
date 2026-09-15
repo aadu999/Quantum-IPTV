@@ -300,8 +300,16 @@ function randomRoomToken(length: number): string {
  * Shared secret proving a peer actually scanned this TV's pairing code.
  *
  * The room id travels through the public broker, so possession of it proves
- * nothing. The secret is carried only in the QR/pairing URL fragment, which
- * never leaves the device that scanned it.
+ * nothing. The secret is carried in the pairing URL the QR code encodes, and is
+ * never published to the broker.
+ *
+ * It is read from the query string, NOT the fragment. That distinction is worth
+ * stating plainly rather than glossing: a fragment is never transmitted, while a
+ * query parameter travels in the request line and can therefore surface in
+ * server access logs, a Referer header, and browser history. On a LAN served by
+ * the television itself the exposure is small, but it is not zero, and the
+ * long-term fix is to move the secret out of the URL entirely -- into a
+ * fragment the page reads and then replays as an Authorization header.
  */
 export function getOrGeneratePairingSecret(): string {
   const params = new URLSearchParams(window.location.search);
