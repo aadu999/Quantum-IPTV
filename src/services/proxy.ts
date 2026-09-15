@@ -46,6 +46,14 @@ function loadLastGoodProxy(): string | null {
   }
 }
 
+function forgetGoodProxy(): void {
+  try {
+    localStorage.removeItem(LAST_GOOD_PROXY_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 function rememberGoodProxy(id: string): void {
   try {
     localStorage.setItem(LAST_GOOD_PROXY_KEY, JSON.stringify({ id, at: Date.now() }));
@@ -85,8 +93,19 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
 
   if (canGoDirect) add('direct', targetUrl);
 
+  // Our own endpoint comes before any third party, and before the remembered
+  // winner. It is same-origin, so it cannot fail CORS; it is the only route
+  // under this project's control; and on the native build it is the request the
+  // WebView intercepts. Letting a remembered public proxy jump ahead of it is
+  // how a working install degrades silently: corsproxy.io began demanding an
+  // API key and started answering 403, but it stayed the preferred route
+  // because it had succeeded once, so every catalogue fetch spent its first
+  // attempt on a host that could no longer work.
+  const selfBuilder = PROXY_BUILDERS.find(b => b.id === 'self');
+  if (selfBuilder) add('self', selfBuilder.build(encoded, targetUrl));
+
   const preferred = loadLastGoodProxy();
-  if (preferred) {
+  if (preferred && preferred !== 'self') {
     const builder = PROXY_BUILDERS.find(p => p.id === preferred);
     if (builder) add(builder.id, builder.build(encoded, targetUrl));
   }
@@ -111,6 +130,7 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
 
       if (!resp.ok) {
         lastErr = new Error(`${id} responded ${resp.status}`);
+        if (id === preferred) forgetGoodProxy();
         continue;
       }
 
@@ -131,8 +151,15 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
       return text;
     } catch (e: any) {
       lastErr = e;
+      if (id === preferred) forgetGoodProxy();
     }
   }
 
-  throw lastErr || new Error(`Unable to fetch resource from ${targetUrl}`);
+  // Every route failed. When they all failed to even connect, the provider is
+  // the common factor, not the routes -- say so, because "failed to fetch" sends
+  // people looking for a bug in the app.
+  throw new Error(
+    `Could not reach the provider through any route (tried ${candidates.map(c => c.id).join(', ')}). ` +
+      `Last error: ${lastErr?.message || lastErr || 'unknown'}`
+  );
 }

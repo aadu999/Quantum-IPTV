@@ -77,6 +77,7 @@ import {
 } from './ui/modals';
 import { showAppAlert, showAppConfirm, closeAppDialog } from './ui/dialog';
 import { initTvNavigation, setTvNavEngineInstance } from './ui/tv-navigation';
+import { initFullscreenModals } from './ui/fullscreen-modals';
 import { registerNativePlayerCallbacks } from './services/native-player';
 
 // Instantiate Core Stream Engine
@@ -922,6 +923,7 @@ export function initApp(): void {
     // while restoring the playlist can never leave the remote unresponsive.
     initTvNavigation();
 
+  initFullscreenModals();
     // Keeps "now playing" and the guide progress bar current once EPG is loaded.
     startEpgAutoRefresh();
 

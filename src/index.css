@@ -286,3 +286,16 @@ body.native-pip-active #video-player {
   height: 100% !important;
   object-fit: contain !important;
 }
+
+
+/*
+ * A modal that has been moved into the fullscreen element. The fullscreen
+ * element is its own stacking context, so the z-index the overlay carried in
+ * the document means nothing inside it -- without this the remote opened
+ * behind the video instead of over it.
+ */
+.fs-hoisted {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+}
