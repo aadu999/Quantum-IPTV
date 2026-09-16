@@ -13,10 +13,14 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.OptIn;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.LoadControl;
 import androidx.media3.ui.PlayerView;
 
 import java.io.IOException;
@@ -111,7 +115,7 @@ public class NativePlayerActivity extends Activity {
         }
 
         PlayerView playerView = findViewById(R.id.native_player_view);
-        player = new ExoPlayer.Builder(this).build();
+        player = buildFastStartPlayer();
         playerView.setPlayer(player);
 
         // Deferred rather than issued before prepare(): a seek requested before the
@@ -177,6 +181,48 @@ public class NativePlayerActivity extends Activity {
      * in Glide/Coil for one thumbnail would be a lot of weight for very
      * little.
      */
+    /**
+     * Builds the player with the fast-start buffering above.
+     *
+     * The opt-in is scoped to this one factory rather than sprayed over
+     * onCreate: LoadControl is @UnstableApi in Media3, so every call site that
+     * touches it has to opt in, and keeping that to a single method means the
+     * rest of the activity still gets the lint check.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    private ExoPlayer buildFastStartPlayer() {
+        return new ExoPlayer.Builder(this).setLoadControl(buildFastStartLoadControl()).build();
+    }
+
+    /**
+     * Starts playback on a fraction of a second of media, then fills a deep
+     * buffer behind it.
+     *
+     * ExoPlayer's defaults wait for 2.5s of buffered media before showing a
+     * frame, which is most of the delay between pressing a title and seeing it.
+     * They are tuned for a scrubbing-heavy VOD app on a flaky mobile network;
+     * this is a set-top box on Wi-Fi playing one title at a time, where the
+     * first frame matters far more than absolute smoothness in the first few
+     * seconds.
+     *
+     * Playback therefore starts at 250ms of media and 500ms after a rebuffer,
+     * while the buffer still grows to 60s once running -- so the fast start
+     * costs nothing in steadiness later. The 50s minimum keeps ExoPlayer
+     * fetching well ahead, which is what actually protects against a provider
+     * that stalls mid-episode.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    private static LoadControl buildFastStartLoadControl() {
+        return new DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                50_000,  // min buffer before it stops fetching
+                60_000,  // max buffer
+                250,     // buffer required to START playing
+                500)     // buffer required to RESUME after a rebuffer
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build();
+    }
+
     private void loadThumbnail(String thumbUrl) {
         if (thumbUrl == null || thumbUrl.isEmpty()) return;
         ImageView thumbView = findViewById(R.id.native_player_loading_thumb);
