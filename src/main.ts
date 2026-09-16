@@ -922,8 +922,8 @@ export function initApp(): void {
     // Bring up D-Pad navigation before any of the boot work below, so a failure
     // while restoring the playlist can never leave the remote unresponsive.
     initTvNavigation();
+    initFullscreenModals();
 
-  initFullscreenModals();
     // Keeps "now playing" and the guide progress bar current once EPG is loaded.
     startEpgAutoRefresh();
 

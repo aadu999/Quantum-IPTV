@@ -1,4 +1,4 @@
-import { HlsConfig, RetryConfig } from 'hls.js';
+import type { HlsConfig, RetryConfig } from 'hls.js';
 import { networkEstimator } from './network-estimator';
 
 /**

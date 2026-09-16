@@ -1,4 +1,4 @@
-import Hls from 'hls.js';
+import type HlsJs from 'hls.js';
 import { Channel } from '../types';
 import { state } from '../state/store';
 import { circuitBreaker } from './circuit-breaker';
@@ -16,6 +16,35 @@ import { playbackDiagnostics } from './diagnostics';
 import { containerOf, isUnplayableContainer } from './container-support';
 import { seriesContext } from '../state/series-context';
 import { playInNativePlayer } from '../services/native-player';
+
+/**
+ * hls.js is 580 KB -- it used to be roughly half the boot bundle -- and not one
+ * byte of it is needed to paint the shell or render the channel list. It is only
+ * needed once a stream actually starts, so it is fetched as its own chunk.
+ *
+ * The binding is module-level rather than per-instance because the library is a
+ * singleton anyway, and because `Hls.ErrorTypes` is read from an error handler
+ * that can only run after a successful load.
+ */
+let Hls: typeof HlsJs | null = null;
+let hlsLibrary: Promise<typeof HlsJs | null> | null = null;
+
+function loadHlsLibrary(): Promise<typeof HlsJs | null> {
+  if (!hlsLibrary) {
+    hlsLibrary = import('hls.js')
+      .then(module => {
+        Hls = module.default;
+        return Hls;
+      })
+      .catch(e => {
+        // A failed chunk fetch is not fatal: Safari and the Android WebView both
+        // play HLS natively, and startAttempt() falls through to that path.
+        console.warn('[QuantumStreamEngine] Could not load the HLS library:', e);
+        return null;
+      });
+  }
+  return hlsLibrary;
+}
 
 /**
  * How long a load may sit without producing a single rendered frame before it is
@@ -118,7 +147,13 @@ function buildOnDemandLadder(url: string): FailoverCandidate[] {
 
 export class QuantumStreamEngine {
   public video: HTMLVideoElement;
-  public hls: Hls | null = null;
+  public hls: HlsJs | null = null;
+  /**
+   * Resolves once initHls() has finished deciding whether there is an hls.js
+   * instance to use. Starts already-resolved so a build that never calls
+   * initHls() -- the remote client -- does not wait on anything.
+   */
+  private hlsReady: Promise<void> = Promise.resolve();
   private watchdog: QuantumStreamWatchdog;
 
   private networkErrorRetries = 0;
@@ -190,16 +225,24 @@ export class QuantumStreamEngine {
 
   initHls(): void {
     if (state.isRemoteClient) return;
+    // Kept synchronous for callers: boot does not wait on the chunk, it just
+    // records the promise that startAttempt() will await if a stream begins
+    // before the library has arrived.
+    this.hlsReady = this.initHlsAsync();
+  }
 
-    if (Hls.isSupported()) {
+  private async initHlsAsync(): Promise<void> {
+    const Lib = await loadHlsLibrary();
+
+    if (Lib && Lib.isSupported()) {
       if (this.hls) {
         this.hls.destroy();
       }
 
-      this.hls = new Hls(createHlsConfig());
+      this.hls = new Lib(createHlsConfig());
       this.hls.attachMedia(this.video);
 
-      this.hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+      this.hls.on(Lib.Events.MANIFEST_PARSED, (_event, data) => {
         this.showSpinner(false);
         this.attemptAutoplay();
         this.updateHudResolution();
@@ -209,11 +252,11 @@ export class QuantumStreamEngine {
         });
       });
 
-      this.hls.on(Hls.Events.LEVEL_SWITCHED, () => {
+      this.hls.on(Lib.Events.LEVEL_SWITCHED, () => {
         this.updateHudResolution();
       });
 
-      this.hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+      this.hls.on(Lib.Events.FRAG_LOADED, (_event, data) => {
         sourceHealthTracker.recordFragment(this.currentSourceUrl, true);
         if (data && data.frag && data.frag.stats) {
           const stats = data.frag.stats;
@@ -231,7 +274,7 @@ export class QuantumStreamEngine {
         }
       });
 
-      this.hls.on(Hls.Events.ERROR, (_event, data) => {
+      this.hls.on(Lib.Events.ERROR, (_event, data) => {
         this.handleHlsError(data);
       });
     }
@@ -255,8 +298,17 @@ export class QuantumStreamEngine {
     sourceHealthTracker.recordFragment(this.currentSourceUrl, false);
     eventBus.emit('BUFFER_LOW', { type: data.type, details: data.details, url: this.currentSourceUrl });
 
+    // Only reachable from a listener attached to a live hls.js instance, so the
+    // library is loaded; the guard is here to narrow the type, not to catch a
+    // case that can happen.
+    const Lib = Hls;
+    if (!Lib) {
+      this.advanceLadder('hls_error');
+      return;
+    }
+
     switch (data.type) {
-      case Hls.ErrorTypes.NETWORK_ERROR:
+      case Lib.ErrorTypes.NETWORK_ERROR:
         this.networkErrorRetries++;
         if (this.networkErrorRetries <= MAX_NETWORK_RETRIES && this.hls) {
           // Back off before retrying: an origin that just refused a request is
@@ -274,7 +326,7 @@ export class QuantumStreamEngine {
         }
         break;
 
-      case Hls.ErrorTypes.MEDIA_ERROR: {
+      case Lib.ErrorTypes.MEDIA_ERROR: {
         this.mediaErrorRetries++;
 
         // A hard cap, unlike the previous 10-second sliding window: a stream
@@ -641,8 +693,30 @@ export class QuantumStreamEngine {
       sourceUrl.includes('/series/');
 
     if (isDirectMedia) {
+      // A progressive file needs no demuxer, so it must not wait on the HLS
+      // chunk: this is the path an on-demand title takes, and it is the one
+      // where start-up latency is most visible.
       this.loadDirectMedia(targetUrl, generation);
-    } else if (this.hls && Hls.isSupported()) {
+      return;
+    }
+
+    void this.attachHlsSource(targetUrl, generation);
+  }
+
+  /**
+   * Hands a manifest to hls.js, waiting for the lazily-fetched library first.
+   *
+   * Without the wait, a viewer who picks a channel during the few hundred
+   * milliseconds the chunk is in flight would find `this.hls` still null and be
+   * dropped onto the native path -- which on Android and Chrome cannot play a
+   * manifest at all, so the channel would simply fail.
+   */
+  private async attachHlsSource(targetUrl: string, generation: number): Promise<void> {
+    if (!this.hls) await this.hlsReady;
+    // The viewer may have zapped again while the chunk was downloading.
+    if (generation !== this.loadGeneration) return;
+
+    if (this.hls && Hls && Hls.isSupported()) {
       this.hls.stopLoad();
       this.hls.attachMedia(this.video);
       this.hls.loadSource(targetUrl);

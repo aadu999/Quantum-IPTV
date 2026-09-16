@@ -1,4 +1,4 @@
-import Hls from 'hls.js';
+import type Hls from 'hls.js';
 import { networkEstimator } from './network-estimator';
 import { eventBus } from '../core/event-bus';
 

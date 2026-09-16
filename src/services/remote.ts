@@ -16,11 +16,14 @@ import {
 } from './lan-server';
 import { seriesContext } from '../state/series-context';
 
-// Bundled rather than loaded from a CDN: both were already package.json
-// dependencies but were being pulled over the network at runtime, so the
-// companion remote silently did nothing whenever the CDN was unreachable.
-import mqtt from 'mqtt';
-import QRCode from 'qrcode';
+// mqtt and qrcode are bundled rather than fetched from a CDN -- both were
+// already package.json dependencies but were being pulled over the network at
+// runtime, so the companion remote silently did nothing whenever the CDN was
+// unreachable. They are imported on demand rather than at the top, because
+// between them they are 388 KB and neither is needed to start the app: the
+// broker is only contacted when the television cannot serve the remote itself,
+// and the QR code is only drawn when the pairing panel is opened. On a native
+// TV serving its own remote, neither chunk is ever fetched.
 
 let mqttClient: any = null;
 let lanLink: QuantumLanLink | null = null;
@@ -214,11 +217,16 @@ export function initRemoteSync(): void {
     sendRemoteCmd('REQUEST_SYNC');
   }
 
-  function connectMqtt(retries = 0): void {
+  async function connectMqtt(retries = 0): Promise<void> {
     if (mqttClient && mqttClient.connected) return;
 
     try {
-      if (typeof mqtt !== 'undefined') {
+      const mqtt = await import('mqtt').then(m => m.default).catch(e => {
+        console.warn('[QuantumRemote] Could not load the MQTT client:', e);
+        return null;
+      });
+
+      if (mqtt) {
         const clientId = (state.isRemoteClient ? 'remote_' : 'tv_') + Math.random().toString(16).substring(2, 10);
         mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
           clientId,
@@ -296,11 +304,11 @@ export function initRemoteSync(): void {
           } catch (e) {}
         });
       } else if (retries < 30) {
-        setTimeout(() => connectMqtt(retries + 1), 200);
+        setTimeout(() => void connectMqtt(retries + 1), 200);
       }
     } catch (e) {
       if (retries < 30) {
-        setTimeout(() => connectMqtt(retries + 1), 300);
+        setTimeout(() => void connectMqtt(retries + 1), 300);
       }
     }
   }
@@ -317,7 +325,7 @@ export function initRemoteSync(): void {
     // broker stopped the peer link from even being attempted — the exact
     // situation where a local route matters most.
     initLanLink();
-    connectMqtt();
+    void connectMqtt();
   });
 }
 
@@ -1055,15 +1063,20 @@ export function openRemotePairingModal(): void {
     canvas.className = 'rounded';
     qrContainer.appendChild(canvas);
 
-    QRCode.toCanvas(canvas, remoteUrl, {
-      width: 170,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-      color: { dark: '#0f172a', light: '#ffffff' }
-    }).catch((err: any) => {
-      console.warn('[QuantumRemote] QR render failed:', err?.message || err);
-      qrContainer.textContent = remoteUrl;
-    });
+    void import('qrcode')
+      .then(({ default: QRCode }) =>
+        QRCode.toCanvas(canvas, remoteUrl, {
+          width: 170,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+          color: { dark: '#0f172a', light: '#ffffff' }
+        })
+      )
+      .catch((err: any) => {
+        console.warn('[QuantumRemote] QR render failed:', err?.message || err);
+        // The URL itself is the fallback: it can still be typed in by hand.
+        qrContainer.textContent = remoteUrl;
+      });
   }
 }
 

@@ -1,4 +1,4 @@
-import Hls from 'hls.js';
+import type Hls from 'hls.js';
 import { StallDiagnosis, RecoveryActionType } from './classifier';
 import { eventBus } from '../core/event-bus';
 

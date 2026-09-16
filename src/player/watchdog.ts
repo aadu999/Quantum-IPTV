@@ -1,4 +1,4 @@
-import Hls from 'hls.js';
+import type Hls from 'hls.js';
 import { PlaybackObserver } from './observer';
 import { StallClassifier, StallDiagnosis } from './classifier';
 import { recoveryPlanner } from './recovery-planner';
