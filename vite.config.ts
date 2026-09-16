@@ -83,10 +83,34 @@ function requestStream(
       }
     );
 
+    // Mirrors api/proxy.js: fail the connect phase fast so the client receives a
+    // real diagnosis instead of its own timeout. Dev has to reproduce the
+    // production failure or there is no way to test the handling of it.
+    let connectTimer: any = setTimeout(() => {
+      const e: any = new Error('Upstream did not accept a connection within 9000ms');
+      e.code = 'UPSTREAM_UNREACHABLE';
+      req.destroy(e);
+    }, 9000);
+    const clearConnectTimer = () => {
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
+    };
+    req.on('socket', socket => {
+      if (socket.connecting) socket.once('connect', clearConnectTimer);
+      else clearConnectTimer();
+    });
+    req.on('response', clearConnectTimer);
+
     req.on('timeout', () => {
+      clearConnectTimer();
       req.destroy(new Error('Upstream timeout'));
     });
-    req.on('error', reject);
+    req.on('error', e => {
+      clearConnectTimer();
+      reject(e);
+    });
     req.end();
   });
 }
@@ -175,8 +199,22 @@ export default defineConfig({
               return;
             } catch (e: any) {
               if (!res.headersSent) {
+                const unreachable =
+                  e.code === 'UPSTREAM_UNREACHABLE' ||
+                  e.code === 'ETIMEDOUT' ||
+                  e.code === 'ECONNREFUSED' ||
+                  e.code === 'EHOSTUNREACH' ||
+                  e.code === 'ENOTFOUND';
                 res.statusCode = 502;
-                res.end(`Proxy Error: ${e.message}`);
+                res.setHeader('Content-Type', 'application/json');
+                res.end(
+                  JSON.stringify({
+                    error: 'Failed to proxy request',
+                    reason: unreachable ? 'upstream_unreachable' : 'proxy_error',
+                    code: e.code || null,
+                    message: e.message
+                  })
+                );
               }
               return;
             }

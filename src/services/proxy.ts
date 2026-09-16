@@ -63,14 +63,55 @@ function rememberGoodProxy(id: string): void {
 }
 
 /**
+ * Raised when the provider's own server could not be reached at all.
+ *
+ * Distinct from a proxy failure on purpose: the two need opposite responses
+ * from the person reading the message. A blocked route is worth retrying
+ * through another; an origin that is not accepting connections is not worth
+ * retrying at all, and no amount of checking credentials will change it.
+ */
+export class ProviderUnreachableError extends Error {
+  readonly host: string;
+
+  constructor(targetUrl: string, detail: string) {
+    let host = targetUrl;
+    try {
+      host = new URL(targetUrl).host;
+    } catch {
+      /* keep the raw string */
+    }
+    super(
+      `The provider's server at ${host} is not accepting connections (${detail}). ` +
+        `This is the provider being down or blocking this network, not a problem with your credentials or with this app.`
+    );
+    this.name = 'ProviderUnreachableError';
+    this.host = host;
+  }
+}
+
+/** Reads our proxy's structured 502 body, or null if it is not one. */
+async function readUpstreamDiagnosis(resp: Response): Promise<string | null> {
+  try {
+    const body = await resp.clone().json();
+    if (body && body.reason === 'upstream_unreachable') {
+      return body.code || body.message || 'no connection';
+    }
+  } catch {
+    /* not our JSON; treat as an ordinary route failure */
+  }
+  return null;
+}
+
+/**
  * Fetches a playlist through whichever route works, trying the most promising
  * first.
  *
- * The previous implementation walked a fixed list with a 20-second timeout on
+ * The original implementation walked a fixed list with a 20-second timeout on
  * each, so a user behind a blocked proxy waited up to 80 seconds before seeing
- * an error — and it relearned the same dead route on every single request. Now
- * the route that last succeeded is tried first, the timeout starts short and
- * only grows for later attempts, and the winner is remembered.
+ * an error -- and it relearned the same dead route on every single request. Now
+ * the winner is remembered, our own endpoint is always tried before any third
+ * party, interchangeable public proxies are given up on quickly, and a failure
+ * that is the origin's rather than the route's ends the search immediately.
  */
 export async function fetchWithProxyFallback(targetUrl: string, options: RequestInit = {}): Promise<string> {
   const encoded = encodeURIComponent(targetUrl);
@@ -117,9 +158,13 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
 
   for (let i = 0; i < candidates.length; i++) {
     const { id, url } = candidates[i];
-    // Start impatient and grow: the first route is the one most likely to work,
-    // so waiting long on it is wasted time when it does not.
-    const timeoutMs = i === 0 ? 8000 : Math.min(20000, 8000 + i * 4000);
+    // `self` and `direct` carry the whole catalogue, which for a large provider
+    // is megabytes, and `self` is the only route that reports *why* an origin
+    // failed. Cutting it off at eight seconds threw away both: a big playlist
+    // looked like a dead route, and the proxy's diagnosis never arrived because
+    // the browser had already given up on it. Third-party proxies stay
+    // impatient -- they are interchangeable, so moving on costs nothing.
+    const timeoutMs = id === 'self' || id === 'direct' ? 25000 : Math.min(15000, 8000 + i * 2000);
 
     try {
       const resp = await fetch(url, {
@@ -131,6 +176,15 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
       if (!resp.ok) {
         lastErr = new Error(`${id} responded ${resp.status}`);
         if (id === preferred) forgetGoodProxy();
+
+        // Our own proxy distinguishes "this origin refused or never answered"
+        // from "this route is broken". The first is true of every route, so
+        // trying three more public proxies only spends another half-minute
+        // reaching the same dead server before showing the same failure.
+        if (id === 'self' && resp.status === 502) {
+          const diagnosis = await readUpstreamDiagnosis(resp);
+          if (diagnosis) throw new ProviderUnreachableError(targetUrl, diagnosis);
+        }
         continue;
       }
 
@@ -150,6 +204,7 @@ export async function fetchWithProxyFallback(targetUrl: string, options: Request
       if (id !== 'direct') rememberGoodProxy(id);
       return text;
     } catch (e: any) {
+      if (e instanceof ProviderUnreachableError) throw e;
       lastErr = e;
       if (id === preferred) forgetGoodProxy();
     }

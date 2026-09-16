@@ -33,6 +33,43 @@ function rewriteM3u8(content, baseUrl) {
     .join('\n');
 }
 
+/**
+ * A version of the target safe to put in a response body or a log line.
+ *
+ * Xtream carries credentials as query parameters, so echoing the URL back on
+ * failure hands the account to anyone who can make this endpoint fail -- and
+ * writes it into the platform's request logs on every timeout.
+ */
+const SECRET_PARAMS = ['username', 'password', 'user', 'pass', 'token', 'auth', 'key', 'k'];
+
+function safeTarget(url) {
+  try {
+    const u = new URL(url);
+    for (const name of SECRET_PARAMS) {
+      if (u.searchParams.has(name)) u.searchParams.set(name, 'REDACTED');
+    }
+    // The path carries them too on stream URLs: /live/<user>/<pass>/123.ts
+    u.pathname = u.pathname.replace(
+      /^\/(live|movie|series)\/[^/]+\/[^/]+\//,
+      '/$1/REDACTED/REDACTED/'
+    );
+    return u.toString();
+  } catch {
+    return '[unparseable target]';
+  }
+}
+
+/**
+ * How long to wait for the TCP connection itself.
+ *
+ * Deliberately far below the socket timeout: when an origin is simply gone the
+ * OS takes fifteen seconds or more to give up, by which time the browser has
+ * abandoned the request and nobody ever sees the reason it failed. Failing the
+ * connect phase quickly means the client receives a real diagnosis instead of
+ * its own timeout.
+ */
+const CONNECT_TIMEOUT_MS = 9000;
+
 function requestStream(url, clientHeaders, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     let parsed;
@@ -74,10 +111,32 @@ function requestStream(url, clientHeaders, maxRedirects = 5) {
       }
     );
 
+    // Armed until the socket is actually connected, then cleared.
+    let connectTimer = setTimeout(() => {
+      const e = new Error(`Upstream did not accept a connection within ${CONNECT_TIMEOUT_MS}ms`);
+      e.code = 'UPSTREAM_UNREACHABLE';
+      req.destroy(e);
+    }, CONNECT_TIMEOUT_MS);
+    const clearConnectTimer = () => {
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
+    };
+    req.on('socket', socket => {
+      if (socket.connecting) socket.once('connect', clearConnectTimer);
+      else clearConnectTimer();
+    });
+    req.on('response', clearConnectTimer);
+
     req.on('timeout', () => {
+      clearConnectTimer();
       req.destroy(new Error('Upstream timeout'));
     });
-    req.on('error', reject);
+    req.on('error', e => {
+      clearConnectTimer();
+      reject(e);
+    });
     req.end();
   });
 }
@@ -146,7 +205,7 @@ export default async function handler(req, res) {
       });
       stream.on('error', err => {
         if (!res.headersSent) {
-          res.status(502).json({ error: "M3U8 stream error", message: err.message, targetUrl });
+          res.status(502).json({ error: "M3U8 stream error", message: err.message, target: safeTarget(targetUrl) });
         }
       });
       return;
@@ -158,7 +217,22 @@ export default async function handler(req, res) {
     stream.pipe(res);
   } catch (err) {
     if (!res.headersSent) {
-      res.status(502).json({ error: "Failed to proxy request", message: err.message, targetUrl });
+      // `reason` is machine-readable so the client can tell "this origin is
+      // gone" from "this route is blocked" and stop trying other routes that
+      // would only reach the same dead origin.
+      const unreachable =
+        err.code === 'UPSTREAM_UNREACHABLE' ||
+        err.code === 'ETIMEDOUT' ||
+        err.code === 'ECONNREFUSED' ||
+        err.code === 'EHOSTUNREACH' ||
+        err.code === 'ENOTFOUND';
+      res.status(502).json({
+        error: "Failed to proxy request",
+        reason: unreachable ? 'upstream_unreachable' : 'proxy_error',
+        code: err.code || null,
+        message: err.message,
+        target: safeTarget(targetUrl)
+      });
     }
   }
 }

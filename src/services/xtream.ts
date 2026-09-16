@@ -1,7 +1,7 @@
 import { Channel } from '../types';
 import { state } from '../state/store';
 import { QuantumSessionStore } from '../state/session';
-import { fetchWithProxyFallback } from './proxy';
+import { fetchWithProxyFallback, ProviderUnreachableError } from './proxy';
 import { inferChannelLanguage, parseM3U, sourceFusionEngine } from './m3u';
 
 export function parseXtreamInput(hostInput?: string, userInput?: string, passInput?: string): {
@@ -149,6 +149,18 @@ export class QuantumXtreamConnector {
 
     let addedCount = 0;
 
+    /**
+     * The first genuine failure seen, kept so the message at the end can name a
+     * cause instead of guessing at one. A provider being unreachable outranks
+     * anything else: it explains every other failure in the same run.
+     */
+    let firstFailure: any = null;
+    const note = (e: any) => {
+      if (!firstFailure || (e instanceof ProviderUnreachableError && !(firstFailure instanceof ProviderUnreachableError))) {
+        firstFailure = e;
+      }
+    };
+
     // If blocking Xtream live feeds, purge any existing xt_live_ channels from state
     if (shouldBlockLive) {
       state.channels = state.channels.filter(ch => !ch.id.startsWith('xt_live_') && ch.group !== 'Xtream Live');
@@ -202,6 +214,7 @@ export class QuantumXtreamConnector {
               });
             }
           } catch (e: any) {
+            note(e);
             console.warn('Xtream Series JSON fetch warning:', e.message);
           }
 
@@ -232,6 +245,7 @@ export class QuantumXtreamConnector {
               });
             }
           } catch (e: any) {
+            note(e);
             console.warn('Xtream VOD JSON fetch warning:', e.message);
           }
 
@@ -267,17 +281,25 @@ export class QuantumXtreamConnector {
                 });
               }
             } catch (e: any) {
+              note(e);
               console.warn('Xtream Live Streams JSON fetch warning:', e.message);
             }
           }
         }
       } catch (e: any) {
+        note(e);
         console.warn('Xtream Strategy A failed:', e.message);
       }
     }
 
     // STRATEGY B: Xtream M3U Plus Feed Fallback (get.php) if Strategy A yielded 0 channels
-    if (addedCount === 0 && username && password) {
+    //
+    // Skipped when Strategy A already established that the host is not
+    // accepting connections: get.php lives on the same server and the same
+    // port, so it can only fail the same way, and trying it doubles how long
+    // the viewer watches a spinner before being told what is wrong.
+    const hostIsUnreachable = firstFailure instanceof ProviderUnreachableError;
+    if (addedCount === 0 && username && password && !hostIsUnreachable) {
       console.log('Initiating Xtream Strategy B (M3U Plus Feed)...');
       const m3uPlusUrl = `${host}/get.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&type=m3u_plus`;
       try {
@@ -293,12 +315,23 @@ export class QuantumXtreamConnector {
           });
         }
       } catch (e: any) {
+        note(e);
         console.error('Xtream Strategy B (M3U Feed) failed:', e.message);
       }
     }
 
     if (addedCount === 0) {
-      throw new Error(`Could not load channels from Xtream server (${host}). Please check credentials, port, or server status.`);
+      // Every strategy above swallows its own failure so that one dead endpoint
+      // cannot stop the others from contributing. That is right, but it used to
+      // mean the reason they all failed was only ever a console warning, and
+      // what the viewer saw was a suggestion to check their credentials -- which
+      // is the wrong thing to go and check when the provider's server is simply
+      // not answering. Keep the first real cause and say it.
+      if (firstFailure instanceof ProviderUnreachableError) throw firstFailure;
+      const detail = firstFailure?.message ? ` Last error: ${firstFailure.message}` : '';
+      throw new Error(
+        `Could not load channels from Xtream server (${host}). Please check credentials, port, or server status.${detail}`
+      );
     }
 
     (window as any).updateLanguageDropdown?.();
