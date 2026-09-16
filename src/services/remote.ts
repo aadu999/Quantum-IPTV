@@ -325,7 +325,19 @@ export function initRemoteSync(): void {
     // broker stopped the peer link from even being attempted — the exact
     // situation where a local route matters most.
     initLanLink();
-    void connectMqtt();
+
+    // The broker connection is deferred to the first idle moment, not because
+    // it is slow to establish but because the mqtt chunk is 372 KB and would
+    // otherwise share the link with hls.js -- which is what the viewer is
+    // actually waiting for. Pairing tolerates arriving a second late; the
+    // player does not. requestIdleCallback's timeout is the floor, so a busy
+    // main thread cannot postpone this indefinitely.
+    const startBroker = () => void connectMqtt();
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(startBroker, { timeout: 3000 });
+    } else {
+      setTimeout(startBroker, 1200);
+    }
   });
 }
 
